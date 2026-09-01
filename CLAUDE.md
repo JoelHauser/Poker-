@@ -86,6 +86,7 @@ equity is built directly on it.
 - **The payout-scale problem largely dissolves.** UTH's Blind paid 500:1 and forced
   ceilings down; a pot cannot pay more than the chips in it. See "The payout scale".
 - The UTH table, its paytables and its strategy are parked, not deleted.
+
 ## The single most important fact
 
 **SPT 4.x server mods are C#, not TypeScript.** The `mod.ts` / `package.json` /
@@ -102,7 +103,7 @@ means the gate, not a bug in the game code.
 | Project | Owns |
 | --- | --- |
 | `src/Poker.Game` | Rules engine. No SPT reference, no I/O, no clock. |
-| `tests/Poker.Game.Tests` | 145 tests. The evaluator, the pot builder and the log are live; the paytables, table and strategy belong to the parked UTH build. |
+| `tests/Poker.Game.Tests` | 163 tests. The evaluator, pot builder, log and hold'em table are live; the paytables, UTH table and strategy are parked. |
 
 Still to come, mirroring Blackjack: `src/Poker.Server`, `src/Poker.Client`,
 `tests/Poker.Server.Tests`, `tools/Poker.Console`, `scripts/smoke.ps1`.
@@ -226,11 +227,71 @@ what it did, and shouts when those disagree.
   UTH, now load-bearing again. Mutation-checked -- see below.
 - `StringEnumListConverter` -- ported from Blackjack, for a list of enums on the
   wire.
+- `HoldemTable` / `HoldemSeat` / `HoldemRules` -- the game. Button, blinds, four
+  streets, a full no-limit betting round, side pots and showdown. See "The betting
+  round" below.
+- `IPokerAgent` -- where a bot's decision comes from, **one instance per seat**. Its
+  `PokerContext` carries that seat's own cards, the board, the stacks, the pot and
+  what is legal -- never another seat's cards and never the deck.
 - The whole Ultimate Texas Hold'em game -- **parked, not on the path**. See "Parked:
   the Ultimate Texas Hold'em build".
 
-Nothing hold'em-specific exists yet beyond `PotBuilder`. The betting round, the
-blinds, the button, the stacks and the bots are all still to write.
+What is missing is the bots themselves: nothing implements `IPokerAgent` yet.
+
+## The betting round
+
+The bug-dense part of hold'em, and where the tests are aimed. Settlement is
+comparatively easy because `PotBuilder` already does it.
+
+Rules that are each one line of code and each cost a real bug when missed:
+
+- **Heads-up reverses the blinds.** The button posts the small blind and acts
+  **first** before the flop, then last on every street after it. With three or more
+  the button is last pre-flop and the seat after the big blind opens. This is the one
+  everybody gets wrong.
+- **After the flop the small blind opens**, which heads-up means the big blind. Two
+  different orders for the two halves of a hand; using one for both is invisible for
+  as long as every bot only checks.
+- **Posting a blind is not acting.** That distinction, and nothing else, is what
+  leaves the big blind its option to raise when the table has only called round to
+  it.
+- **A raise must be at least the size of the last one.** Otherwise a player can grind
+  a round out in single chips and never let it close.
+- **An all-in too small to be a full raise does not reopen the betting.** Seats that
+  have already acted owe the difference and may call or fold, but may not raise
+  again. Miss it and a short all-in becomes an unlimited raising war between two
+  other players.
+- **An uncalled bet comes back** rather than being counted as a pot that was won.
+  `PotBuilder` already does this; the table only has to return it to the stack.
+- **The odd chip on a split goes to the first winner left of the button.** Any rule
+  will do; having none quietly destroys a chip a hand, and a table whose books drift
+  is a bug nobody sees until the numbers are far apart.
+
+### Chips are conserved, and that is the invariant to build against
+
+Every hand starts with a known number of chips at the table and must end with the
+same number. `ChipsAreNeitherCreatedNorDestroyed` fuzzes two to five seats through
+three hundred hands of random aggression and checks it after every one. The ways to
+break it all live in the betting round -- an uncalled bet kept, a side pot paid
+twice, an odd chip dropped -- and none of them are settlement bugs.
+
+Mutation-checked, nine faults, each caught: heads-up blinds reversed, no minimum
+raise, a short all-in reopening the betting, posting a blind counting as acting, the
+odd chip dropped, uncalled bets not returned, a round closing before everyone has
+matched, the flop using the pre-flop order, and a seat betting more than it has.
+
+**Three of those nine survived the first pass**, and all three were holes in the
+tests rather than in the code:
+
+- The big-blind-option test asserted on the *first* thing that seat was offered, and
+  a table that closed the pre-flop round early simply offered it the same shape on
+  the flop -- nothing to call, a raise available. **Assert the street.**
+- The post-flop order tests only ever used bots that checked, so every order looked
+  alike. Order is only visible when somebody bets: make the seat that should act
+  first bet, then check that the next seat has something to call.
+- The clamp stopping a seat betting more than it has is currently unreachable,
+  because the options already cap every caller. Unreachable defensive code needs a
+  direct test or it silently stops being true.
 
 ### The evaluator is trustworthy, and here is why
 
@@ -615,7 +676,7 @@ These were settled there against the real client and apply unchanged.
 ## Verifying
 
 ```
-dotnet test    # 145 tests, no SPT needed. About 7s -- the strategy simulation dominates.
+dotnet test    # 163 tests, no SPT needed. About 8s -- the parked UTH simulation dominates.
 ```
 
 **Distrust a suite that passes first time.** Mutation-check anything that ranks a
@@ -667,13 +728,14 @@ Blackjack ships as `com.mybutthasarash.blackjack` on the same rule.
 
 - Working branch **`uth`** (named before the variant changed), off `main` at
   `9c4b9e9`. Pushed to `origin/uth`.
-- `Poker.Game` green at **145 tests** in about 7 seconds, mutation-checked
+- `Poker.Game` green at **163 tests** in about 8 seconds, mutation-checked
   throughout.
 - **The variant is no-limit Texas Hold'em against bots**, decided after two
   reversals. See the top of this file, and read it before reopening the question.
-- **Nothing hold'em-specific is built yet** beyond `PotBuilder`, which is the
-  settlement path and is already tested. The betting round, blinds, button, stacks
-  and bots are all still to write.
+- **The hold'em table is built and tested.** Button, blinds, four streets, a full
+  no-limit betting round with min-raises and short all-ins, side pots, split pots and
+  showdown. Chip conservation is fuzzed across two to five seats. What is missing is
+  the bots: nothing implements `IPokerAgent`.
 - A complete UTH game is in the tree and **parked**. It is green and does no harm;
   nothing new should call into it.
 - Nothing SPT-facing exists yet -- no server project, no client plugin, no routes.
@@ -682,15 +744,14 @@ Blackjack ships as `com.mybutthasarash.blackjack` on the same rule.
 
 **The game**
 
-- **Write the betting round.** Blinds, the button, action order, min-raise, and an
-  all-in too small to reopen the action. This is the bug-dense part of hold'em and
-  the next real piece of work -- settlement is comparatively easy and `PotBuilder`
-  already does most of it.
-- **Stacks and a chip denomination.** A stack is what a bet is sized against and what
-  decides side-pot eligibility, so it comes before the bots.
-- **Then the bots**: Monte Carlo equity off `HandEvaluator`, a discrete sizing menu,
-  position awareness, randomised aggression -- and one agent per seat, which the UTH
-  table got wrong.
+- **Write the bots.** Monte Carlo equity off `HandEvaluator`, a discrete sizing menu,
+  position awareness, randomised aggression. `IPokerAgent` is the seam and the table
+  already drives one instance per seat.
+- **A chip denomination**, so a buy-in in roubles becomes a whole number of chips.
+  Rounding at that boundary is where money goes missing.
+- **Busting and re-seating.** `StartHand` refuses to deal to a seat with no chips,
+  deliberately -- who leaves and who sits down is table management and does not
+  belong in the middle of a deal.
 - **Then the dynamism** under "They have to feel like real people": persistence
   between hands, notional stacks that can bust and be replaced, mood that drifts,
   engine-emitted reactions, and thinking time drawn from how close the decision was.
