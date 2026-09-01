@@ -56,6 +56,16 @@ public sealed record Rules
     public HandCategory DealerQualifies { get; init; } = HandCategory.Pair;
 
     /// <summary>
+    /// The most seats a table can have, the player's included. The player chooses
+    /// how many are filled; this is the ceiling on that choice.
+    ///
+    /// Five is a table that reads as a table without becoming a crowd. Nothing in
+    /// the rules cares -- seats do not interact -- so the real limits are screen
+    /// width and the deck: five seats plus the dealer and the board is 17 cards.
+    /// </summary>
+    public int MaxSeats { get; init; } = 5;
+
+    /// <summary>
     /// The most a hand can return, as a multiple of the Ante, if everything lands.
     ///
     /// Ante at 1:1 returns 2, the largest Play at 1:1 returns twice itself, and the

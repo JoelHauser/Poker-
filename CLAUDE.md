@@ -74,13 +74,20 @@ because half the tables online describe a different Blind paytable.
   | Case | Ante | Play | Blind |
   | --- | --- | --- | --- |
   | Player folds | loses | never made | loses |
-  | Player beats a qualified dealer | 1:1 | 1:1 | paytable |
-  | Player beats a dealer who did not qualify | **push** | 1:1 | paytable |
+  | Beats a qualified dealer | 1:1 | 1:1 | paytable |
+  | Beats a dealer that did not open | **push** | 1:1 | paytable |
   | Tie | push | push | push |
-  | Player loses | loses | loses | loses |
+  | Loses to a qualified dealer | loses | loses | loses |
+  | Loses to a dealer that did not open | **push** | loses | loses |
+
+  **The Ante pushes on every hand where the dealer fails to open, including one the
+  player lost.** That last row is the one worth writing down: reading the rule as
+  "the Ante pushes when the player wins" is the natural misreading, it looks right
+  in every winning hand you test, and it quietly keeps money that was never the
+  house's.
 
   Trips resolves on the player's own hand and ignores the dealer entirely -- it pays
-  even when the dealer wins.
+  even when the dealer wins, and **a fold does not reach it**.
 - **The Blind pays only on a straight or better**, and pushes below that even on a
   winning hand. Standard paytable: royal flush 500:1, straight flush 50:1, quads
   10:1, full house 3:1, flush 3:2, straight 1:1. **See "The payout scale" -- the
@@ -104,7 +111,7 @@ means the gate, not a bug in the game code.
 | Project | Owns |
 | --- | --- |
 | `src/Poker.Game` | Rules engine. No SPT reference, no I/O, no clock. |
-| `tests/Poker.Game.Tests` | 85 tests over the evaluator, the pot builder, the log and the paytables. |
+| `tests/Poker.Game.Tests` | 106 tests over the evaluator, the pot builder, the log, the paytables and the table. |
 
 Still to come, mirroring Blackjack: `src/Poker.Server`, `src/Poker.Client`,
 `tests/Poker.Server.Tests`, `tools/Poker.Console`, `scripts/smoke.ps1`.
@@ -222,6 +229,18 @@ what it did, and shouts when those disagree.
   21 combinations, deliberately: this runs dozens of times a hand, not millions, so
   the only thing worth optimising for is being correct on inspection.
 - `GameLog` -- the engine's logging seam. See "Logging".
+- `Paytable` / `Rules` -- the Blind, the capped Blind and Trips, as data. See "The
+  paytables are data".
+- `UltimateHoldemTable` / `Seat` / `TableView` -- the game. Deals, runs the three
+  decision points, plays the dealer's fixed rule and settles all three bets. See
+  "The table, and the two things fixed inside it".
+- `ISeatAgent` -- where a seat-mate's decision comes from. The table drives it
+  already; nothing implements it yet. Its `SeatContext` carries only that seat's own
+  cards, the community cards showing and the legal multiples -- never the dealer's
+  hand, the player's, or another seat's. A bot that cannot see those cannot cheat
+  with them.
+- `StringEnumListConverter` -- ported from Blackjack, for the list of available
+  actions on the wire.
 - `PotBuilder` -- correct, tested, mutation-checked, and **not used by UTH**. Side
   pots need a shared pot and UTH has none. It is kept because it costs nothing and a
   multiway mode may still be wanted one day, but **no settlement code should grow a
@@ -281,24 +300,43 @@ stake (4), overflow wraps instead of throwing (1).
 A mistyped row is invisible to every single-hand test around it and shows up only as
 one hand paying worse than a hand it beats.
 
-## What UTH needs that does not exist yet
+## The table, and the two things fixed inside it
 
-The engine is variant-independent so far. Everything below is new work.
+`UltimateHoldemTable` is written and settles all three bets. Two decisions in it are
+now load-bearing for every test in the repo.
 
-- **`UltimateHoldemTable`** -- the state machine. Phases: AwaitingBet, PreFlop
-  (hole cards dealt, 4x/3x/Check), Flop (2x/Check), River (1x/Fold), Showdown,
-  Settled. It owns the deal order, the dealer's hand and the community cards.
-- **A fixed, documented deal order.** Adding or removing a seat must not silently
-  change which cards the player gets from a stacked deck, or every pinned test
-  drifts at once. Decide it, write it in a comment, and test it.
-- **Settlement across three bets.** Ante, Blind and Play resolve on different rules
-  and the dealer's qualification only touches the Ante. This is the most likely
-  place for a quiet error -- see the pot builder caveat above.
-- **Two paytables** (Blind, Trips) as data, not code, so they can be capped per
-  wallet without a second code path.
-- **The bot seat-mates**, below.
-- **A strategy oracle**, eventually: UTH has a known correct strategy, and the same
-  table that drives the bots can drive an optional hint for the player.
+**The table seats one to five, the player included**, at `Rules.MaxSeats`. The player
+picks how many are filled. Nothing in the rules cares -- seats never interact -- so
+the real constraints are screen width and the deck, which needs 17 cards at five
+seats. The player is always seat 0; which seat the client *draws* them at is a
+presentation question that does not reach the engine.
+
+**The deal order is the casino rotation**: one card at a time round the seats, the
+dealer last, twice, then the five community cards off the top. Written down because
+it has to be -- adding a seat changes which cards every later position receives, so
+a stacked-deck test is pinned to a seat count as well. If this order ever moves,
+every pinned deal becomes wrong at the same moment, and the failures read as rules
+bugs rather than as a changed deal. Procedures vary between houses; nothing depends
+on which was chosen, only on it never changing.
+
+### The table is mutation-checked too
+
+Each was introduced and the suite caught it: the Ante pushes only on a hand the seat
+won (1 fail), the Blind paytable consulted on a tie (1), folding takes the Trips bet
+with it (1), a winning Play returns winnings without its stake (2), the dealer needs
+better than a pair to open (3), the river offers a third check (1), the dealer dealt
+before the seats (5), every hole card visible from the deal (1).
+
+The first two are the ones to re-run after touching settlement. Both look right in
+every winning hand anyone would think to write down.
+
+### Still to come
+
+- **The bot seat-mates.** `ISeatAgent` is the seam and the table already drives it;
+  what is missing is a brain behind it. See below.
+- **A strategy oracle**, which is the same work: UTH has a known correct strategy,
+  and the table that drives the bots is the one that measures the house edge and can
+  drive an optional hint for the player.
 
 ## The AI seat-mates
 
@@ -558,7 +596,7 @@ These were settled there against the real client and apply unchanged.
 ## Verifying
 
 ```
-dotnet test    # 85 tests, no SPT needed
+dotnet test    # 106 tests, no SPT needed
 ```
 
 **Distrust a suite that passes first time.** Mutation-check anything that ranks a
@@ -597,30 +635,32 @@ Blackjack ships as `com.mybutthasarash.blackjack` on the same rule.
 **Update this section as work completes.**
 
 - Working branch **`uth`**, off `main` at `9c4b9e9`.
-- `Poker.Game` green at **85 tests**, mutation-checked -- evaluator (44),
-  `PotBuilder` (17), the log seam (8) and the paytables (16).
+- `Poker.Game` green at **106 tests**, mutation-checked throughout -- evaluator
+  (44), `PotBuilder` (17), the log seam (8), the paytables (16) and the table (21).
 - **The variant is decided** -- Ultimate Texas Hold'em with AI seat-mates.
-- **The paytables are written** -- Blind, Blind-for-valuables and Trips, as data,
-  with `Rules` selecting between them. The table state machine and the bots are
-  still to come.
+- **The game is playable in the engine.** `UltimateHoldemTable` deals one to five
+  seats, runs the three decision points, plays the dealer's qualifying rule and
+  settles the Ante, the Blind and Trips. What it cannot do is fill the other seats:
+  `ISeatAgent` has no implementation.
 - Nothing SPT-facing exists yet -- no server project, no client plugin, no routes.
 
 ### Open items
 
-- **Write `UltimateHoldemTable`.** The deal order, the three decision points and
-  the three-bet settlement. This is the next real piece of work.
+- **Write the seat-mate brain** behind `ISeatAgent` -- the UTH strategy table, then
+  personality dials over it, an injectable RNG, and a log line per decision. Doing
+  this also gives the house-edge check its correct-play oracle, which is the real
+  reason it comes next.
+- **Confirm the house edge lands near 2.2% of the Ante** over a few hundred thousand
+  simulated hands once that oracle exists. A settlement bug large enough to matter
+  moves that number and no pinned hand would catch it.
 - **Set the wallet ceilings** from `Rules.WorstCaseReturnPerAnte` -- 511 antes on
   the standard table, 14 on the capped one -- once `Wallets.cs` is ported. The
   ceiling is a question about free grid cells, not about what the house can afford.
-- **Decide how many seats the table has**, and **fix the deal order**, before any
-  test pins a stacked deck. Changing either later invalidates every pinned deal at
-  once.
-- **Build the bots** once the table exists -- strategy table, personality dials,
-  injectable RNG, a log line per decision, and a test that they never touch `IBank`.
 - Port `Bank`, `ProfileGateway`, `EscrowStore`, `StatsStore`, `BlackjackLog` and
   `Fakes` from Blackjack largely as-is; they are currency plumbing and carry no
   blackjack rules.
 - Port `CardView` / `Textures` / `MenuButtonPatch` from `Blackjack.Client`.
-- **Make the wire enums strings** from the start, with property-level attributes.
+- The wire enums are strings already, with property-level attributes -- see
+  `TableView.cs`. Keep it that way when the server's own contracts are written.
 - Decide whether `PotBuilder` stays. It is correct and free to keep, but it is dead
   code under UTH and dead code invites someone to use it.
