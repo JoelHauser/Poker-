@@ -104,10 +104,11 @@ means the gate, not a bug in the game code.
 | --- | --- |
 | `src/Poker.Game` | Rules engine. No SPT reference, no I/O, no clock. |
 | `tests/Poker.Game.Tests` | 189 tests. The evaluator, pot builder, log, hold'em table and bots are live; the paytables, UTH table and strategy are parked. |
+| `src/Poker.Server` | The mod: routes, DI, logging, wallet reading. **Moves no money yet.** |
 | `tools/Poker.Console` | Terminal table and soak harness. No SPT needed. See "The harness". |
+| `scripts/` | `pack-mod.ps1` builds the droppable zip, `pack-console.ps1` the harness, `smoke.ps1` drives a real server. |
 
-Still to come, mirroring Blackjack: `src/Poker.Server`, `src/Poker.Client`,
-`tests/Poker.Server.Tests`, `scripts/smoke.ps1`.
+Still to come, mirroring Blackjack: `src/Poker.Client`, `tests/Poker.Server.Tests`.
 
 The engine knows nothing about currency -- it takes an `int` and returns an `int`.
 Everything that maps a `Wallet` to an item template belongs in `Wallets.cs` and
@@ -646,6 +647,42 @@ that actually reached a showdown, so it is already saying which hands may be sho
 Reading `Street == Showdown` instead leaks the winner's cards on every hand that ends
 early -- which is most of them.
 
+## Shipping it to an install
+
+```
+./scripts/pack-mod.ps1                         # releases/Poker-<ver>-SPT4.1.zip
+./scripts/pack-mod.ps1 -InstallPath 'H:\SPT4.1.X'
+./scripts/smoke.ps1 -SessionId <id> -PingOnly
+```
+
+The zip lays out as `SPT_Runtime/user/mods/Poker/` and extracts at the **root** of
+the install, which is how Blackjack ships. It carries only this mod's two
+assemblies and `config.json` -- SPT provides its own, and a second copy of those in
+one process is a load conflict waiting to happen.
+
+**What v0.1.0 is.** It loads, announces itself, registers six static routes, reads
+wallet balances, and plays real no-limit hold'em against the bots over HTTP. It is
+genuinely droppable and genuinely testable.
+
+**What it is not.** There is no client plugin, so there is nothing to look at in
+Tarkov -- the whole thing is driven by `smoke.ps1` or curl. And **it moves no
+money**: the chips are notional, sitting down costs nothing and cashing out pays
+nothing. That is a deliberate stopping point rather than an oversight. A mod that
+cannot move money cannot lose any, so the parts that load, route and play get
+proven against a real profile before the money path -- the part that cost
+Blackjack the most -- is written.
+
+The startup banner says so out loud, because the alternative is somebody watching
+a stash that never changes and concluding the mod is broken.
+
+### The client plugin cannot be built here
+
+It has to compile against `Assembly-CSharp.dll` and the `spt-*` DLLs of the
+install it will run on: 4.1.3's `PluginValidator` reads a plugin's `spt-*`
+references and requires a major.minor match. It also targets `net472`, not .NET
+10, because it runs in the game's mono runtime. That work happens on the machine
+with the game on it.
+
 ## Things that will bite you
 
 Carried over from Blackjack. Each cost real time there. None are hypothetical, and
@@ -702,8 +739,14 @@ all of them still apply to this mod.
   game's mono runtime.
 - **Bash heredocs mangle backslashes**, and a long one containing quotes will fail
   to parse outright. Use the Write tool for C# and for any large file.
-- **`Compress-Archive` writes backslash zip entries**, which extract as one literal
-  filename on Linux. Pack releases with `System.IO.Compression` instead.
+- **Zip entries must be written by hand with forward slashes.** `Compress-Archive`
+  writes backslash entry names, which extract on Linux as one file literally called
+  `SPT_Runtime\user\mods\Poker\config.json`. An earlier version of this note said to
+  use `System.IO.Compression` instead -- **that is not a fix.**
+  `ZipFile::CreateFromDirectory` does exactly the same on Windows, which was found by
+  opening the first zip this repo produced and reading the entry names. Open the
+  archive and add each entry with `CreateEntryFromFile`, replacing the separators
+  yourself; `scripts/pack-mod.ps1` does. Check the entry names of anything you ship.
 
 ## Talking to the server without a game client
 
@@ -900,10 +943,14 @@ Blackjack ships as `com.mybutthasarash.blackjack` on the same rule.
   throughout.
 - **The variant is no-limit Texas Hold'em against bots**, decided after two
   reversals. See the top of this file, and read it before reopening the question.
-- **The game is playable.** `dotnet run --project tools/Poker.Console` deals a real
-  table against seven characters' worth of improvised opponents. The table deals,
-  bets and settles; the bots blend, drift and go broke. What is missing is everything
-  SPT-facing: no server, no client, no routes.
+- **The game is playable, and there is a mod you can drop into an install.**
+  `dotnet run --project tools/Poker.Console` deals a table in a terminal;
+  `./scripts/pack-mod.ps1` produces `releases/Poker-0.1.0-SPT4.1.zip`, which loads
+  into SPT 4.1.3 and serves six routes.
+- **The mod moves no money.** Chips are notional, so it is safe to point at a real
+  profile. See "Shipping it to an install".
+- **There is no client plugin**, so nothing is visible in Tarkov yet. It has to be
+  built on the machine with the game on it.
 - A complete UTH game is in the tree and **parked**. It is green and does no harm;
   nothing new should call into it.
 - Nothing SPT-facing exists yet -- no server project, no client plugin, no routes.
@@ -927,8 +974,10 @@ Blackjack ships as `com.mybutthasarash.blackjack` on the same rule.
 - Decide UTH's fate -- delete, ship as a second table, or leave parked. Undecided on
   purpose; it costs nothing where it is.
 
-**The money**
+**The money -- the next real piece of work**
 
+- **Wire the buy-in and cash-out.** `IBank` reads balances and nothing else; debit,
+  credit and the shortfall-to-mail path are still to port from Blackjack's `Bank`.
 - **Buy-in and cash-out replace per-hand settlement**, which Blackjack did not have
   to do. `EscrowStore` must hold the player's **current stack**, updated as it
   changes, not the amount they sat down with -- a crash mid-session has to return
