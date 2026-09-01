@@ -92,8 +92,8 @@ because half the tables online describe a different Blind paytable.
   winning hand. Standard paytable: royal flush 500:1, straight flush 50:1, quads
   10:1, full house 3:1, flush 3:2, straight 1:1. **See "The payout scale" -- the
   500:1 is not survivable on every wallet and is capped for valuables.**
-- House edge is about 2.2% of the Ante under correct play, which is the number to
-  sanity-check a simulation against.
+- House edge is about 2.2% of the Ante under correct play. See "Verifying" for why
+  that number cannot be confirmed by simulation at any sane cost.
 
 ## The single most important fact
 
@@ -111,7 +111,7 @@ means the gate, not a bug in the game code.
 | Project | Owns |
 | --- | --- |
 | `src/Poker.Game` | Rules engine. No SPT reference, no I/O, no clock. |
-| `tests/Poker.Game.Tests` | 106 tests over the evaluator, the pot builder, the log, the paytables and the table. |
+| `tests/Poker.Game.Tests` | 145 tests over the evaluator, the pot builder, the log, the paytables, the table and the strategy. |
 
 Still to come, mirroring Blackjack: `src/Poker.Server`, `src/Poker.Client`,
 `tests/Poker.Server.Tests`, `tools/Poker.Console`, `scripts/smoke.ps1`.
@@ -234,11 +234,14 @@ what it did, and shouts when those disagree.
 - `UltimateHoldemTable` / `Seat` / `TableView` -- the game. Deals, runs the three
   decision points, plays the dealer's fixed rule and settles all three bets. See
   "The table, and the two things fixed inside it".
-- `ISeatAgent` -- where a seat-mate's decision comes from. The table drives it
-  already; nothing implements it yet. Its `SeatContext` carries only that seat's own
-  cards, the community cards showing and the legal multiples -- never the dealer's
-  hand, the player's, or another seat's. A bot that cannot see those cannot cheat
-  with them.
+- `ISeatAgent` -- where a seat-mate's decision comes from. Its `SeatContext` carries
+  only that seat's own cards, the community cards showing and the legal multiples --
+  never the dealer's hand, the player's, or another seat's. A bot that cannot see
+  those cannot cheat with them.
+- `UthStrategy` -- correct play. See "The strategy, and what the river cost".
+- `SeatMateAgent` / `SeatPersonality` -- the strategy with dials on it. **All seats
+  currently share one agent instance**, so the four seat-mates are one person with
+  four labels. See "They have to feel like real people".
 - `StringEnumListConverter` -- ported from Blackjack, for the list of available
   actions on the wire.
 - `PotBuilder` -- correct, tested, mutation-checked, and **not used by UTH**. Side
@@ -330,13 +333,50 @@ before the seats (5), every hole card visible from the deal (1).
 The first two are the ones to re-run after touching settlement. Both look right in
 every winning hand anyone would think to write down.
 
-### Still to come
+## The strategy, and what the river cost
 
-- **The bot seat-mates.** `ISeatAgent` is the seam and the table already drives it;
-  what is missing is a brain behind it. See below.
-- **A strategy oracle**, which is the same work: UTH has a known correct strategy,
-  and the table that drives the bots is the one that measures the house edge and can
-  drive an optional hint for the player.
+`UthStrategy` is correct play. Pre-flop and the flop are lookups; **the river is
+computed**, and the difference between those two things was worth six points of
+house edge.
+
+The rule of thumb first written for the river -- bet a hidden pair or better,
+otherwise fold -- folded 26% of hands where the real game folds about 19%, and every
+one of those folds threw away two antes. The measured edge came out at 8.4%.
+
+The river does not need a rule of thumb. Every card is out; the only unknown is the
+dealer's two, and there are exactly 990 ways to draw them from the 45 nobody can see.
+Walking all of them gives the exact value of betting, and the comparison against
+folding is then arithmetic. About four milliseconds a decision, which is nothing once
+a hand.
+
+**Folding is the expensive decision in this game and every plausible heuristic
+forgets it.** Giving up costs a flat two antes, so a hand only has to beat that to be
+worth one more. The clearest case: a royal flush on the board cannot be beaten, so
+every dealer holding ties and betting is worth exactly zero -- and every rule of
+thumb ("you have nothing of your own", "you are playing the board") folds it, which
+is the worst answer available. `AnUnbeatableBoardIsBackedEvenThoughItCannotWin` pins
+that.
+
+### The edge is still about three points high, and it is probably the lookups
+
+Measured over 100,000 hands: **5.4%, with a 95% interval of [2.4%, 8.4%]**, against
+a published 2.185%. The interval excludes the published figure, so this is a real gap
+and not sampling noise.
+
+What that gap is **not**, on the evidence: the standard deviation came out at 4.875
+against a published 4.94; the average amount wagered at 4.14 antes against 4.15; the
+dealer opens 82.4% of the time; folded hands settle at exactly -2.000 and pushes at
+exactly 0.000; and every settlement mutation is caught. Settlement is well evidenced.
+
+What is left is **which hands the pre-flop and flop lookups actually select**. The
+frequencies are right to within a point or two, but a range that is slightly wrong in
+composition costs real money while looking correct in a histogram -- raising 4x with
+hands that should check risks four antes at a time. Reconstructing the published
+table from memory is what produced the river bug, so this wants checking against the
+real strategy table rather than another guess.
+
+It does not block anything. The player plays by hand, so this affects the seat-mates
+and any hint feature, not the game's correctness.
 
 ## The AI seat-mates
 
@@ -360,6 +400,52 @@ Cheap by construction, and that is the point of choosing UTH.
 - **Their hole cards are hidden until showdown**, on the same rule as the dealer's:
   omitted from the payload entirely rather than blanked. See "Things that will bite
   you" -- Blackjack learned this on the hole card.
+
+### They have to feel like real people. This is a stated requirement, not polish.
+
+The table is meant to feel alive and the seats are meant to read as players rather
+than as a lookup table with names on it.
+
+**The honest constraint first**, because it shapes every answer below: in UTH the
+seat-mates cannot take the player's money. There is no pot -- every seat plays its
+own hand against the dealer. So they can never be made to feel real by being
+*dangerous*. They are made to feel real by having a life of their own that the
+player watches happen: their own money, their own runs of luck, their own mistakes,
+and their own reactions to all three.
+
+What that needs, roughly in order of how much it buys:
+
+1. **Persistence between hands.** The same named characters, still there next hand,
+   with a history the player can notice. A cast that is re-rolled every deal is
+   scenery.
+2. **A bankroll with consequences.** Each seat has notional chips that rise and
+   fall, and a seat that busts **leaves and is replaced**. A player who can go broke
+   is the single strongest signal that a seat is a person, and it costs almost
+   nothing -- `Seat.Net` already produces the number.
+3. **Mood that moves.** Dials that drift during a session rather than sitting where
+   they were set: a seat that has lost four in a row chases, a seat that just won
+   big gets careless. A fixed personality is still a lookup table, just a biased
+   one. This is the thing that most makes a bot stop feeling mechanical.
+4. **Reactions tied to real events**, emitted by the engine rather than invented by
+   the client -- hitting the Blind paytable, a bad beat, a third fold running, a
+   royal. The client must never make up a fact about a hand; it renders what the
+   engine says happened.
+5. **Timing.** Real players do not act instantly or uniformly. The engine should hand
+   the client a thinking time per decision, and it already knows the right one: the
+   river calculation produces the exact value of betting against folding, so **a seat
+   can take longer precisely when the decision is genuinely close.** That single
+   detail does more than any amount of random delay.
+6. **Visible mistakes.** The dials already produce them and the log already records
+   them; surfacing one as a tell is nearly free.
+
+**Known flaw blocking this: the table takes one `ISeatAgent` for every seat**, so
+today all four seat-mates are the same person with different labels. Distinct
+characters need an agent per seat -- a list, or a factory keyed on the seat. Fix
+that before building anything above it.
+
+None of this belongs in the client. The engine owns behaviour and emits events; the
+client owns rendering and animation. A bot whose personality lives in the UI cannot
+be tested and will not survive the first refactor.
 
 ## The payout scale, and the ceilings it forces
 
@@ -596,7 +682,7 @@ These were settled there against the real client and apply unchanged.
 ## Verifying
 
 ```
-dotnet test    # 106 tests, no SPT needed
+dotnet test    # 145 tests, no SPT needed. About 7s -- the strategy simulation dominates.
 ```
 
 **Distrust a suite that passes first time.** Mutation-check anything that ranks a
@@ -604,10 +690,25 @@ hand or moves money -- see the evaluator and pot builder notes above for the
 pattern, and port Blackjack's `MoneyInvariantTests` before writing settlement
 rather than after.
 
-A UTH settlement suite has one check the others do not: **simulate a few hundred
-thousand hands under correct play and confirm the house edge lands near 2.2% of the
-Ante.** A settlement bug large enough to matter moves that number, and no single
-pinned hand would catch it.
+**Do not try to confirm the house edge by simulation.** An earlier version of this
+file said to, and it does not work. UTH has a standard deviation near 4.9 antes a
+hand, so pinning a 2.185% edge to within a tenth of a point needs about nine million
+hands. A hundred thousand -- already three and a half minutes -- gives a 95% interval
+six points wide, which cannot tell a correct settlement from one losing three points
+somewhere.
+
+Measure the **decision mix** instead. It is a proportion rather than a payoff, so
+three thousand hands pin it to under a point, and it is what caught the river rule
+being wrong. Correct play, for reference:
+
+| | 4x | 2x | 1x | fold | average wagered |
+| --- | --- | --- | --- | --- | --- |
+| Published | ~38% | ~13% | ~29% | ~19.6% | 4.15 antes |
+| This engine | 39.5% | 14.1% | 27.8% | 18.6% | 4.14 antes |
+
+The standard deviation is a second cheap check on the paytables, but it is
+heavy-tailed -- a royal lands about once in thirty thousand hands -- so it reads low
+on any short run and the band around it has to be wide.
 
 On a machine with SPT, `scripts\smoke.ps1 -SessionId <id> -PingOnly` first. It
 touches no money and proves the mod loaded, the route is reachable, the session
@@ -635,24 +736,28 @@ Blackjack ships as `com.mybutthasarash.blackjack` on the same rule.
 **Update this section as work completes.**
 
 - Working branch **`uth`**, off `main` at `9c4b9e9`.
-- `Poker.Game` green at **106 tests**, mutation-checked throughout -- evaluator
-  (44), `PotBuilder` (17), the log seam (8), the paytables (16) and the table (21).
+- `Poker.Game` green at **145 tests** in about 7 seconds, mutation-checked
+  throughout -- evaluator (44), `PotBuilder` (17), the log seam (8), the paytables
+  (16), the table (21) and the strategy (39).
 - **The variant is decided** -- Ultimate Texas Hold'em with AI seat-mates.
-- **The game is playable in the engine.** `UltimateHoldemTable` deals one to five
-  seats, runs the three decision points, plays the dealer's qualifying rule and
-  settles the Ante, the Blind and Trips. What it cannot do is fill the other seats:
-  `ISeatAgent` has no implementation.
+- **The game plays itself.** `UltimateHoldemTable` deals one to five seats, runs the
+  three decision points, plays the dealer's rule and settles all three bets;
+  `SeatMateAgent` fills the other seats and a table can be run to showdown with no
+  input at all.
 - Nothing SPT-facing exists yet -- no server project, no client plugin, no routes.
 
 ### Open items
 
-- **Write the seat-mate brain** behind `ISeatAgent` -- the UTH strategy table, then
-  personality dials over it, an injectable RNG, and a log line per decision. Doing
-  this also gives the house-edge check its correct-play oracle, which is the real
-  reason it comes next.
-- **Confirm the house edge lands near 2.2% of the Ante** over a few hundred thousand
-  simulated hands once that oracle exists. A settlement bug large enough to matter
-  moves that number and no pinned hand would catch it.
+- **Give every seat its own agent.** The table takes one `ISeatAgent` for all of
+  them, so the seat-mates are currently one person wearing four names. This blocks
+  everything under "They have to feel like real people", which is a stated
+  requirement rather than polish.
+- **Then build the dynamism**: persistence between hands, bankrolls that can bust,
+  mood that drifts, engine-emitted reactions, and thinking time taken from how close
+  the river decision was.
+- **Check the pre-flop and flop ranges against a real strategy table.** The edge
+  measures three points high and the evidence points at which hands the lookups
+  select, not at settlement -- see "The strategy, and what the river cost".
 - **Set the wallet ceilings** from `Rules.WorstCaseReturnPerAnte` -- 511 antes on
   the standard table, 14 on the capped one -- once `Wallets.cs` is ported. The
   ceiling is a question about free grid cells, not about what the house can afford.

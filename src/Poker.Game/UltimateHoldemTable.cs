@@ -84,6 +84,13 @@ public sealed class UltimateHoldemTable
 
     public Seat Player => _seats[PlayerSeatIndex];
 
+    /// <summary>
+    /// The community cards that are showing. Face-down cards are absent rather than
+    /// hidden behind a flag, on the same rule the view follows -- nothing that has
+    /// not been turned over can be read from here.
+    /// </summary>
+    public IReadOnlyList<Card> Community => _community.Take(_revealed).ToList();
+
     /// <summary>The street the table is waiting on, or null when no decision is due.</summary>
     public Street? CurrentStreet => Phase switch
     {
