@@ -17,12 +17,21 @@ public readonly record struct HandResult(HandRank Rank, IReadOnlyList<Card> Card
 /// </summary>
 public static class HandEvaluator
 {
-    public static HandRank Evaluate(IReadOnlyList<Card> cards) => Best(cards).Rank;
+    public static HandRank Evaluate(IReadOnlyList<Card> cards, IGameLog? log = null) => Best(cards, log).Rank;
 
     /// <summary>Convenience for tests -- <c>HandEvaluator.Evaluate("AS KS QS JS TS")</c>.</summary>
-    public static HandRank Evaluate(string codes) => Evaluate(Card.ParseMany(codes));
+    public static HandRank Evaluate(string codes, IGameLog? log = null) =>
+        Evaluate(Card.ParseMany(codes), log);
 
-    public static HandResult Best(IReadOnlyList<Card> cards)
+    /// <summary>
+    /// The best five of what it is given.
+    ///
+    /// <paramref name="log"/> records the reading, not the search: which five cards
+    /// were chosen and what they came to. The 21 combinations behind that are not
+    /// logged even when a log is attached -- at showdown that is a seat's worth of
+    /// noise per hand, and the losing 20 explain nothing.
+    /// </summary>
+    public static HandResult Best(IReadOnlyList<Card> cards, IGameLog? log = null)
     {
         if (cards.Count is < 5 or > 7)
         {
@@ -32,7 +41,14 @@ public static class HandEvaluator
 
         if (cards.Count == 5)
         {
-            return new HandResult(Evaluate5(cards), [.. cards]);
+            var only = new HandResult(Evaluate5(cards), [.. cards]);
+
+            if (log?.Enabled == true)
+            {
+                log.Write($"hand: {string.Join(' ', cards)} reads {only.Rank.Describe()}");
+            }
+
+            return only;
         }
 
         var n = cards.Count;
@@ -62,6 +78,13 @@ public static class HandEvaluator
 
             bestRank = rank;
             bestCards = [.. five];
+        }
+
+        if (log?.Enabled == true)
+        {
+            log.Write(
+                $"hand: best of {n} from {string.Join(' ', cards)} "
+                + $"is {string.Join(' ', bestCards)} -- {bestRank.Describe()}");
         }
 
         return new HandResult(bestRank, bestCards);
