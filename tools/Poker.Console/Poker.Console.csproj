@@ -7,6 +7,12 @@
     <Nullable>enable</Nullable>
     <RootNamespace>Poker.Console</RootNamespace>
     <AssemblyName>Poker.Console</AssemblyName>
+    <Version>0.1.0</Version>
+
+    <!-- Trimming is off: the bots reach HandEvaluator through generics and reflection
+         is not worth auditing for a 70MB saving on a debug tool. -->
+    <PublishTrimmed>false</PublishTrimmed>
+    <InvariantGlobalization>true</InvariantGlobalization>
 
     <!--
       The namespace Poker.Console shadows System.Console inside this project, so every

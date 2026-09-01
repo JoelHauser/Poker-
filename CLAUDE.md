@@ -616,6 +616,24 @@ The invariant checking is the point, not a decoration:
 
 4,500 soaked hands across two, three and five seats have not broken one.
 
+### Taking it to another machine
+
+```
+./scripts/pack-console.ps1          # dist/console-win-x64/Poker.Console.exe
+./scripts/pack-console.ps1 -Zip     # and a zip beside it in releases/
+```
+
+**Self-contained by default**, which is 70MB of exe and worth it: the box with the
+game on it is not the box this gets built on, and it needs no .NET installed.
+`-FrameworkDependent` gives a small build for a machine that has the .NET 10 runtime.
+
+The zip is gitignored -- thirty megabytes that rebuild in seconds. The mod zip, when
+there is one, is small and gets tracked the way Blackjack's is.
+
+**This is not the SPT mod.** There is no server project and no client plugin, so
+there is nothing to drop into `user/mods/`. Testing inside Tarkov needs the whole
+server and client half of this file first.
+
 ### It found something on the first hand it drew
 
 Not in the engine -- in the renderer, which showed a bot's hole cards on a hand that
