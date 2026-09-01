@@ -24,10 +24,18 @@ namespace Poker.Game;
 /// </summary>
 public sealed class BotAgent : IPokerAgent
 {
-    private readonly PokerPersonality _personality;
+    private readonly PokerPersonality _base;
     private readonly Random _rng;
     private readonly IGameLog _log;
     private readonly int _samples;
+
+    /// <summary>
+    /// Where the seat's head is, from -1 (rattled) through 0 (level) to +1 (running
+    /// hot). Moves with results and decays back towards level on its own.
+    /// </summary>
+    private double _mood;
+
+    private int _losingStreak;
 
     public BotAgent(
         PokerPersonality? personality = null,
@@ -35,16 +43,119 @@ public sealed class BotAgent : IPokerAgent
         IGameLog? log = null,
         int samples = HandEquity.DefaultSamples)
     {
-        _personality = personality ?? PokerPersonality.Balanced;
+        _base = personality ?? PokerPersonality.Balanced;
         _rng = rng ?? new Random();
         _log = log ?? GameLog.Null;
         _samples = samples;
     }
 
-    public PokerPersonality Personality => _personality;
+    /// <summary>Who this seat is when it sits down, before anything has happened to it.</summary>
+    public PokerPersonality Personality => _base;
+
+    /// <summary>How rattled or how hot, -1 to +1.</summary>
+    public double Mood => _mood;
+
+    public int LosingStreak => _losingStreak;
+
+    /// <summary>
+    /// Who this seat is **right now**, which is the base character bent by how the
+    /// night is going.
+    ///
+    /// Direction falls out of <see cref="PokerPersonality.Risk"/> rather than being a
+    /// dial of its own, because the two real reactions to losing are the two ends of
+    /// it. Gamblers steam: they loosen up, start swinging, and try to get it back in
+    /// one hand. Careful players shut down and wait. Both are things you can watch
+    /// happen at a table, and a bot that did neither would be the one thing no player
+    /// ever is -- unchanged by the last hour.
+    /// </summary>
+    public PokerPersonality Current
+    {
+        get
+        {
+            // Steadiness is how little any of this reaches them. At 1 the seat plays
+            // its thousandth hand exactly as it played its first.
+            var swing = _mood * (1 - _base.Steadiness);
+
+            if (Math.Abs(swing) < 0.001)
+            {
+                return _base;
+            }
+
+            // Losing and winning are not mirror images of each other, and modelling
+            // them as one signed number got it backwards: it had a gambler running hot
+            // becoming *careful*, which is the one thing a gambler never does.
+            if (swing < 0)
+            {
+                var hurt = -swing;
+
+                // A steamer loosens and swings harder to get it back. A careful player
+                // does the opposite and shuts down. Which one a seat does falls out of
+                // whether it is a gambler, and both are things you can watch happen.
+                return _base.Risk >= 0.5
+                    ? _base.Shift(
+                        tightness: -hurt * 0.28,
+                        aggression: hurt * 0.26,
+                        bluff: hurt * 0.20,
+                        risk: hurt * 0.15)
+                    : _base.Shift(
+                        tightness: hurt * 0.26,
+                        aggression: -hurt * 0.18,
+                        bluff: -hurt * 0.12,
+                        risk: -hurt * 0.15);
+            }
+
+            // Winning makes everybody a little bolder, whoever they are. Confidence
+            // is not a personality type.
+            return _base.Shift(
+                tightness: -swing * 0.12,
+                aggression: swing * 0.14,
+                bluff: swing * 0.10);
+        }
+    }
+
+    /// <summary>
+    /// Takes the result of a hand and moves the seat's head accordingly.
+    ///
+    /// Scaled by what the hand cost as a share of a full stack, so losing a whole
+    /// buy-in registers and losing a blind does not. Folding pre-flop for a small
+    /// loss barely counts, which is right -- nobody tilts off a folded small blind.
+    /// </summary>
+    public void HandEnded(HandOutcome outcome)
+    {
+        var scale = Math.Clamp(outcome.Net / (double)Math.Max(1, outcome.BuyIn), -1, 1);
+
+        if (outcome.Net < 0)
+        {
+            // A hand given up cheaply is not a beat. A stack lost at showdown is.
+            _losingStreak += outcome.Folded && Math.Abs(scale) < 0.1 ? 0 : 1;
+        }
+        else if (outcome.Net > 0)
+        {
+            _losingStreak = 0;
+        }
+
+        // Decays towards level first, so a seat that has been left alone for a while
+        // comes back to itself rather than carrying an hour-old bad beat forever.
+        _mood *= 0.82;
+        _mood += scale * 1.4;
+
+        // A run of losses weighs more than any single one. Three in a row is what
+        // makes a person start playing differently, not the arithmetic.
+        _mood -= _losingStreak >= 3 ? 0.12 : 0;
+
+        _mood = Math.Clamp(_mood, -1, 1);
+
+        if (_log.Enabled && Math.Abs(_mood) > 0.25)
+        {
+            _log.Write(
+                $"  {_base.Name} is {(_mood < 0 ? "rattled" : "running hot")} "
+                + $"({_mood:F2}, {_losingStreak} lost in a row)");
+        }
+    }
 
     public HoldemDecision Decide(PokerContext context)
     {
+        var personality = Current;
         var options = context.Options;
         var seat = context.Seat;
         var opponents = Math.Max(1, context.Opponents.Count(other => !other.Folded));
@@ -70,13 +181,13 @@ public sealed class BotAgent : IPokerAgent
 
         // Acting last is worth something real, and how much a seat believes that is
         // one of the clearest differences between a good player and a weak one.
-        var position = _personality.Positional * (context.SeatsToActAfter == 0 ? 0.05 : -0.04);
+        var position = personality.Positional * (context.SeatsToActAfter == 0 ? 0.05 : -0.04);
 
         // Chips already in are gone whatever happens next, but they do change what is
         // being played for -- which is why a committed stack calls hands it would
         // never have opened.
         var invested = seat.CommittedThisHand / (double)Math.Max(1, seat.CommittedThisHand + seat.Stack);
-        var commitment = invested * 0.12 * (0.5 + _personality.Risk);
+        var commitment = invested * 0.12 * (0.5 + personality.Risk);
 
         var strength = Math.Clamp(equity + position + commitment, 0, 1);
 
@@ -86,7 +197,7 @@ public sealed class BotAgent : IPokerAgent
         // The span here is what separates the characters, and it was originally too
         // narrow to see: a rock and a calling station folded at almost the same rate,
         // which is not two players, it is one player with two names.
-        var callBar = price + 0.01 + (_personality.Tightness * 0.18);
+        var callBar = price + 0.01 + (personality.Tightness * 0.18);
 
         // The bar for putting money in rather than merely matching it. Aggression
         // lowers it, which is exactly what aggression is.
@@ -94,17 +205,17 @@ public sealed class BotAgent : IPokerAgent
         // the binding constraint for everybody in the middle, so a merely ordinary
         // player raised as rarely as a calling station and the two were the same
         // seat wearing different names.
-        var raiseBar = 0.60 + (_personality.Tightness * 0.10) - (_personality.Aggression * 0.30);
+        var raiseBar = 0.60 + (personality.Tightness * 0.10) - (personality.Aggression * 0.30);
 
         // How often it takes a raise it qualifies for. Nearly the whole range, so a
         // passive seat almost never puts money in of its own accord and a maniac
         // almost always does -- a floor of a quarter made even the calling station
         // raise once every three chances.
-        var raises = willRaise < 0.05 + (0.9 * _personality.Aggression);
+        var raises = willRaise < 0.05 + (0.9 * personality.Aggression);
 
         // Bluffing into a crowd does not work and real players know it, so the
         // frequency falls off sharply with every extra opponent left to get through.
-        var bluffs = willBluff < _personality.Bluff * Math.Pow(0.55, opponents - 1);
+        var bluffs = willBluff < personality.Bluff * Math.Pow(0.55, opponents - 1);
 
         var bigBlinds = seat.Stack / (double)Math.Max(1, context.Rules.BigBlind);
 
@@ -113,7 +224,7 @@ public sealed class BotAgent : IPokerAgent
         if (_log.Enabled)
         {
             _log.Write(
-                $"  {seat.Name} ({_personality.Name}): equity {equity:P0}, "
+                $"  {seat.Name} ({personality.Name}): equity {equity:P0}, "
                 + $"price {price:P0}, {(context.SeatsToActAfter == 0 ? "last to act" : "out of position")}, "
                 + $"{bigBlinds:F0}bb -> {decision}");
         }
@@ -126,7 +237,7 @@ public sealed class BotAgent : IPokerAgent
             // fractions only ever gets the chips in worse. Anyone who has watched a
             // tournament recognises this and the risk dial decides how early a seat
             // starts thinking that way.
-            if (bigBlinds <= 6 + (6 * _personality.Risk) && strength > 0.45 && CanRaise())
+            if (bigBlinds <= 6 + (6 * personality.Risk) && strength > 0.45 && CanRaise())
             {
                 return HoldemDecision.RaiseTo(options.MaxRaiseTo);
             }
@@ -139,7 +250,7 @@ public sealed class BotAgent : IPokerAgent
                 {
                     // Very strong and out of position occasionally checks instead, to
                     // let somebody else do the betting. Passive seats do it more.
-                    return slowPlay < 0.12 * (1 - _personality.Aggression) && strength > 0.75
+                    return slowPlay < 0.12 * (1 - personality.Aggression) && strength > 0.75
                         ? HoldemDecision.Check
                         : HoldemDecision.RaiseTo(Size(strength));
                 }
@@ -158,7 +269,7 @@ public sealed class BotAgent : IPokerAgent
 
             if (strength >= raiseBar && raises && CanRaise())
             {
-                return slowPlay < 0.10 * (1 - _personality.Aggression) && strength > 0.80
+                return slowPlay < 0.10 * (1 - personality.Aggression) && strength > 0.80
                     ? HoldemDecision.Call
                     : HoldemDecision.RaiseTo(Size(strength));
             }
@@ -188,7 +299,7 @@ public sealed class BotAgent : IPokerAgent
         {
             var fractions = new[] { 0.35, 0.55, 0.75, 1.0 };
 
-            var lean = (confidence * 0.5) + (_personality.Aggression * 0.35) + (sizing * 0.3);
+            var lean = (confidence * 0.5) + (personality.Aggression * 0.35) + (sizing * 0.3);
             var index = Math.Clamp((int)(lean * fractions.Length), 0, fractions.Length - 1);
 
             var raiseBy = (int)Math.Round(fractions[index] * (pot + toCall));

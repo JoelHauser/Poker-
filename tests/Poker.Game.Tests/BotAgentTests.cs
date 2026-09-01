@@ -88,6 +88,11 @@ public class BotAgentTests
 
             return decision;
         }
+
+        // Forwarded, and it must be. A wrapper that swallows this measures a bot with
+        // its memory disconnected -- which is not the bot the game runs, and it made
+        // these tests quietly disagree with the real table.
+        public void HandEnded(HandOutcome outcome) => inner.HandEnded(outcome);
     }
 
     /// <summary>
@@ -184,6 +189,7 @@ public class BotAgentTests
             .Select(p => (
                 p.Name,
                 Fold: p.Counter.WhenAsked(HoldemMove.Fold),
+                Call: p.Counter.WhenAsked(HoldemMove.Call),
                 Raise: p.Counter.WhenAsked(HoldemMove.Raise)))
             .ToList();
 
@@ -191,8 +197,15 @@ public class BotAgentTests
         {
             foreach (var right in signatures.Where(other => other.Name != left.Name))
             {
-                var apart = Math.Abs(left.Fold - right.Fold) + Math.Abs(left.Raise - right.Raise);
-                Assert.True(apart > 0.06, $"{left.Name} and {right.Name} play almost identically");
+                // The whole action distribution, not two corners of it. Two seats that
+                // fold alike can still differ in whether they call or raise the rest.
+                var apart = Math.Abs(left.Fold - right.Fold)
+                    + Math.Abs(left.Call - right.Call)
+                    + Math.Abs(left.Raise - right.Raise);
+                Assert.True(
+                    apart > 0.12,
+                    $"{left.Name} (fold {left.Fold:P0} call {left.Call:P0} raise {left.Raise:P0}) and "
+                    + $"{right.Name} (fold {right.Fold:P0} call {right.Call:P0} raise {right.Raise:P0}) play almost identically");
             }
         }
     }

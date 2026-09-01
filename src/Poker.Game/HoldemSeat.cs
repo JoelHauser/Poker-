@@ -79,6 +79,18 @@ public sealed class HoldemSeat
     /// <summary>Chips taken from the pots at the end of the hand.</summary>
     public int Won { get; internal set; }
 
+    /// <summary>
+    /// What was in front of this seat before the blinds went out.
+    ///
+    /// The only honest way to say what a hand cost: winnings minus what was committed
+    /// misses an uncalled bet coming back, and reports a raise that everybody folded
+    /// to as a large loss rather than as a small win.
+    /// </summary>
+    public int StackAtHandStart { get; internal set; }
+
+    /// <summary>What the hand actually made or cost, refunds included.</summary>
+    public int Net => Stack - StackAtHandStart;
+
     internal void Add(Card card) => _cards.Add(card);
 
     /// <summary>

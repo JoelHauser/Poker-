@@ -19,6 +19,7 @@ public class HoldemTableTests
         }
     }
 
+
     private static IPokerAgent Passive => new Bot(context =>
         context.Options.Moves.Contains(HoldemMove.Check) ? HoldemDecision.Check : HoldemDecision.Call);
 

@@ -146,6 +146,7 @@ public sealed class HoldemTable
         foreach (var seat in _seats)
         {
             seat.ClearForNewHand();
+            seat.StackAtHandStart = seat.Stack;
         }
 
         _community.Clear();
@@ -563,6 +564,18 @@ public sealed class HoldemTable
                     .ToList();
 
             Share(pot.Amount, winners);
+        }
+
+        // Told before the commitments are cleared, so a seat can see what the hand
+        // actually cost it. Every seat hears about it, including the ones that folded
+        // on the first street -- giving a hand up is a result too, and a seat that
+        // only heard about showdowns would never notice it was being run over.
+        foreach (var seat in _seats)
+        {
+            if (_agents.TryGetValue(seat.Index, out var agent))
+            {
+                agent.HandEnded(new HandOutcome(seat.Net, seat.Stack, _rules.BuyIn, seat.Folded));
+            }
         }
 
         foreach (var seat in _seats)

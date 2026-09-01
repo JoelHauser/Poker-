@@ -103,7 +103,7 @@ means the gate, not a bug in the game code.
 | Project | Owns |
 | --- | --- |
 | `src/Poker.Game` | Rules engine. No SPT reference, no I/O, no clock. |
-| `tests/Poker.Game.Tests` | 176 tests. The evaluator, pot builder, log, hold'em table and bots are live; the paytables, UTH table and strategy are parked. |
+| `tests/Poker.Game.Tests` | 186 tests. The evaluator, pot builder, log, hold'em table and bots are live; the paytables, UTH table and strategy are parked. |
 
 Still to come, mirroring Blackjack: `src/Poker.Server`, `src/Poker.Client`,
 `tests/Poker.Server.Tests`, `tools/Poker.Console`, `scripts/smoke.ps1`.
@@ -237,8 +237,9 @@ what it did, and shouts when those disagree.
   the Ultimate Texas Hold'em build".
 
 - `BotAgent` / `PokerPersonality` / `HandEquity` -- the opponents. Monte Carlo
-  equity, pot odds, position, stack depth and eight characters over one decision
-  procedure. See "How they actually decide".
+  equity, pot odds, position, stack depth and seven characters over one decision
+  procedure -- blendable, and drifting with how the night goes. See "How they
+  actually decide".
 
 ## The betting round
 
@@ -427,25 +428,64 @@ What goes into a decision, which is what a person weighs too:
   `Risk` dial decides how early.
 - **How many opponents are still live**, which throttles bluffing hard.
 
-The dials are `Tightness`, `Aggression`, `Bluff`, `Risk` and `Positional`, each 0 to
-1. Measured over sixty hands apiece, facing a bet:
+The dials are `Tightness`, `Aggression`, `Bluff`, `Risk`, `Positional` and
+`Steadiness`, each 0 to 1. Measured over sixty hands apiece, facing a bet:
 
 | | folds | calls | raises |
 | --- | --- | --- | --- |
 | Rock | 78% | 18% | 4% |
-| Owl | 73% | 20% | 7% |
-| Grinder | 67% | 20% | 13% |
-| Shark | 55% | 26% | 19% |
-| Tourist | 47% | 45% | 8% |
-| Station | 42% | 57% | 2% |
-| Gambler | 35% | 36% | 29% |
-| Maniac | 27% | 33% | 40% |
+| Grinder | 70% | 17% | 13% |
+| Shark | 61% | 18% | 20% |
+| Tourist | 50% | 39% | 11% |
+| Station | 44% | 55% | 2% |
+| Maniac | 32% | 24% | 44% |
+| Gambler | 27% | 35% | 38% |
 
-**The spans on the dials matter more than their midpoints**, and both had to be
-widened after measurement. At the first attempt a rock folded 15% and a calling
+**The spans on the dials matter more than their midpoints**, and every one has had to
+be widened after measuring. At the first attempt a rock folded 15% and a calling
 station 11%, and a merely ordinary player raised as rarely as a station -- that is
-not eight characters, it is one character with eight names. If a dial is retuned,
-re-measure this table rather than trusting that it still separates.
+not a cast, it is one character with several names. **If a dial is retuned, measure
+this table again rather than trusting that it still separates.**
+
+There were eight characters. An "Owl" -- tight, patient, enormous when it finally
+played -- came out folding 74% and raising 2%, which is the Rock with a different
+name on it, and its real trait was about bet *sizing* rather than about how often it
+acted. Seven that genuinely differ beat eight where two are the same person, and only
+four are ever at a table at once.
+
+### They are not fixed, and they are not only these seven
+
+Two things make the seats a population rather than a list.
+
+**They blend.** `Blend` interpolates every dial between two characters and
+`Improvise` crosses two at random and jitters the result, so a table can be filled
+with people who are mostly a grinder with a streak of gambler in them. The named cast
+are landmarks, not the population.
+
+This works *only* because every character runs the same procedure and differs only in
+its numbers. Eight separate decision procedures could not be blended at all -- there
+would be nothing to interpolate. It is the whole return on having built it as dials.
+
+**They drift.** `IPokerAgent.HandEnded` tells every seat how each hand went, and
+`BotAgent` carries a mood from -1 to +1 that moves with results and decays back
+towards level. `Current` is the base character bent by that mood; `Personality` is
+who they were when they sat down.
+
+- **Which way a seat tilts falls out of `Risk`, not a dial of its own.** Gamblers
+  steam -- looser, swinging harder, trying to get it back in one hand. Careful
+  players shut down. Both are things you can watch happen at a table.
+- **Losing and winning are not mirror images.** Modelling them as one signed number
+  had a gambler running *hot* becoming careful, which is the one thing a gambler
+  never does. Winning makes everybody a little bolder; confidence is not a
+  personality type.
+- **`Steadiness` is how little any of it reaches them.** At 1 a seat plays its
+  thousandth hand exactly as it played its first.
+- **Net has to come off the stack.** Winnings minus what was committed misses an
+  uncalled bet coming back, and reports a raise everybody folded to as a large loss
+  -- which would have seats tilting off hands they had just won. `HoldemSeat.Net` is
+  `Stack - StackAtHandStart` for this reason.
+- **Folding a blind is not a bad beat.** A streak counter that thinks otherwise has
+  every seat steaming within an orbit.
 
 ### Three things about testing bots that cost time here
 
@@ -460,6 +500,10 @@ re-measure this table rather than trusting that it still separates.
   on *live* opponents, and by the time anyone checks after the flop most of the table
   has folded -- so a test that varies the seat count measures almost nothing (48%
   against 46%). Condition on what the rule actually reads.
+- **A test wrapper around an agent must forward `HandEnded`.** One here did not, so
+  every personality measurement was quietly taken with the bot's memory disconnected,
+  and the tests disagreed with the real table without failing. If `IPokerAgent` grows
+  another method, every wrapper in the tests needs it too.
 
 ### They have to feel like real people. This is a stated requirement, not polish.
 
@@ -734,7 +778,7 @@ These were settled there against the real client and apply unchanged.
 ## Verifying
 
 ```
-dotnet test    # 176 tests, no SPT needed. About 8s.
+dotnet test    # 186 tests, no SPT needed. About 8s.
 ```
 
 **Distrust a suite that passes first time.** Mutation-check anything that ranks a
@@ -786,7 +830,7 @@ Blackjack ships as `com.mybutthasarash.blackjack` on the same rule.
 
 - Working branch **`uth`** (named before the variant changed), off `main` at
   `9c4b9e9`. Pushed to `origin/uth`.
-- `Poker.Game` green at **176 tests** in about 8 seconds, mutation-checked
+- `Poker.Game` green at **186 tests** in about 8 seconds, mutation-checked
   throughout.
 - **The variant is no-limit Texas Hold'em against bots**, decided after two
   reversals. See the top of this file, and read it before reopening the question.
@@ -802,9 +846,10 @@ Blackjack ships as `com.mybutthasarash.blackjack` on the same rule.
 
 **The game**
 
-- **Give the bots a life between hands** -- the dynamism requirement below. They
-  play well enough now; what they do not have is memory, a bankroll that can bust,
-  or a mood that moves.
+- **Give the bots a life the player can see.** Mood and memory are in; what is
+  missing is everything visible: names and faces that persist, notional stacks that
+  can bust and be replaced, engine-emitted reactions, and thinking time taken from
+  how close the decision was. See "They have to feel like real people".
 - **A chip denomination**, so a buy-in in roubles becomes a whole number of chips.
   Rounding at that boundary is where money goes missing.
 - **Busting and re-seating.** `StartHand` refuses to deal to a seat with no chips,

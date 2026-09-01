@@ -120,6 +120,13 @@ public readonly record struct OpponentView(
     bool Folded,
     bool IsAllIn);
 
+/// <summary>How a hand finished, from one seat's point of view.</summary>
+/// <param name="Net">Chips won or lost. Negative is a losing hand.</param>
+/// <param name="Stack">What is left in front of them afterwards.</param>
+/// <param name="BuyIn">What a full stack looks like, so a loss can be judged as a share of one.</param>
+/// <param name="Folded">Whether they gave the hand up rather than losing it at showdown.</param>
+public readonly record struct HandOutcome(int Net, int Stack, int BuyIn, bool Folded);
+
 /// <summary>
 /// Where a bot's decision comes from.
 ///
@@ -130,4 +137,17 @@ public readonly record struct OpponentView(
 public interface IPokerAgent
 {
     HoldemDecision Decide(PokerContext context);
+
+    /// <summary>
+    /// Told to every seat when a hand finishes, including seats that folded early.
+    ///
+    /// This is the only way a bot can carry anything from one hand to the next, and
+    /// without it a seat has no memory: it plays the thousandth hand exactly as it
+    /// played the first, which is the thing that most gives a table away as
+    /// machinery. Ignoring it is a legitimate choice for a simple agent, so it does
+    /// nothing by default.
+    /// </summary>
+    void HandEnded(HandOutcome outcome)
+    {
+    }
 }
