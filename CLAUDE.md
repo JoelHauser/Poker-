@@ -104,7 +104,7 @@ means the gate, not a bug in the game code.
 | Project | Owns |
 | --- | --- |
 | `src/Poker.Game` | Rules engine. No SPT reference, no I/O, no clock. |
-| `tests/Poker.Game.Tests` | 69 tests over the evaluator, the pot builder and the log. |
+| `tests/Poker.Game.Tests` | 85 tests over the evaluator, the pot builder, the log and the paytables. |
 
 Still to come, mirroring Blackjack: `src/Poker.Server`, `src/Poker.Client`,
 `tests/Poker.Server.Tests`, `tools/Poker.Console`, `scripts/smoke.ps1`.
@@ -132,7 +132,7 @@ Line counts are from the working tree, as a sense of what each piece costs.
 | `src/Blackjack.Server/Wallets.cs` | 90 | Six wallets, templates, symbols, per-wallet limits. **Retune the limits** -- see "The payout scale". |
 | `src/Blackjack.Server/Escrow.cs` | 146 | Records a stake until settlement, refunds orphans on next contact. `Hold` accumulates, which is what UTH's late Play bet needs. |
 | `src/Blackjack.Server/BlackjackLog.cs` | 75 | Logger with a verbosity switch and the mod folder. See "Logging". |
-| `src/Blackjack.Server/ModMetadata.cs` | 27 | New GUID, name and URL; the `~4.1.3` range is unchanged. |
+| `src/Blackjack.Server/ModMetadata.cs` | 27 | New name and URL; the `~4.1.3` range is unchanged. The GUID is **`com.mybutthasarash.poker`** -- see "Releasing". |
 | `src/Blackjack.Server/Startup.cs` | 50 | Boot banner. Retune the lines it prints. |
 | `src/Blackjack.Game/EnumJson.cs` | 67 | `StringEnumListConverter`. Needed the moment a view carries a list of available actions. |
 | `src/Blackjack.Client/Textures.cs` | 461 | Every sprite drawn in code -- rounded boxes, chips, felt. The mod ships no art. |
@@ -254,6 +254,32 @@ still balance. Conservation is necessary and nowhere near sufficient: money can 
 conserved and still settle to the wrong seat. **The same trap is waiting in UTH
 settlement**, where three bets resolve on different rules and a total can come out
 right with the Blind and the Play swapped.
+
+### The paytables are data, and the reasons are in the code
+
+`Paytable.cs` holds `Payout` (odds, not a multiplier, so 3:2 stays exact) and the
+three standard tables. `Rules.cs` chooses between them.
+
+Three decisions in there that a reader will otherwise undo:
+
+- **A push and a loss are both `Payout` values**, not states the caller tracks. The
+  Blind pushes beneath a straight and Trips loses beneath trips, and settlement code
+  that treats those alike takes money the player was never owed.
+- **The royal row is `RoyalOnly`** and sits above the straight-flush row, because a
+  royal is not a category -- it is an ace-high straight flush. Ignore that flag and
+  every straight flush pays 500:1.
+- **`BlindForValuables` exists for divisibility, not only for size.** Every row pays
+  a whole number on a single unit; the standard table's 3:2 does not, and half a
+  bitcoin does not exist.
+
+Mutation-checked. Each was introduced and the suite caught it: royal row claims
+every straight flush (1 fail), 3:2 rounds half down (1), the Blind loses beneath a
+straight (1), Trips pushes instead of losing (2), a win returns winnings without the
+stake (4), overflow wraps instead of throwing (1).
+
+`NoTableEverPaysLessForABetterHand` is the one to keep when the tables are retuned.
+A mistyped row is invisible to every single-hand test around it and shows up only as
+one hand paying worse than a hand it beats.
 
 ## What UTH needs that does not exist yet
 
@@ -532,7 +558,7 @@ These were settled there against the real client and apply unchanged.
 ## Verifying
 
 ```
-dotnet test    # 69 tests, no SPT needed
+dotnet test    # 85 tests, no SPT needed
 ```
 
 **Distrust a suite that passes first time.** Mutation-check anything that ranks a
@@ -556,26 +582,39 @@ extracts into an SPT install. The version lives in **two** places and they must
 agree: the server csproj `<Version>` and `ModMetadata.Version`. SPT's own assemblies
 are not bundled -- the server provides them.
 
+**The mod GUID is `com.mybutthasarash.poker`**, and **both halves declare it
+unchanged** -- `ModMetadata.ModGuid` on the server and `[BepInPlugin]` on the client
+plugin, with no `.client` suffix on either. The Forge checks that the two halves
+agree with the GUID the mod is registered under and rejects an upload where they
+differ. There is nothing to collide with: BepInEx keeps its own plugin registry and
+SPT's mod GUID lives in the server metadata, so the two identifiers never meet.
+Blackjack ships as `com.mybutthasarash.blackjack` on the same rule.
+
 ---
 
 ## Current state
 
 **Update this section as work completes.**
 
-- `Poker.Game` green at **69 tests**, mutation-checked -- evaluator (44),
-  `PotBuilder` (17), and the log seam (8).
-- `Pot.cs`, `PotBuilderTests.cs`, `GameLog.cs` and `GameLogTests.cs` are
-  **uncommitted**; everything else is at `9c4b9e9`.
-- **The variant is decided** -- Ultimate Texas Hold'em with AI seat-mates. The
-  table state machine, the paytables and the bots are all still to be written.
+- Working branch **`uth`**, off `main` at `9c4b9e9`.
+- `Poker.Game` green at **85 tests**, mutation-checked -- evaluator (44),
+  `PotBuilder` (17), the log seam (8) and the paytables (16).
+- **The variant is decided** -- Ultimate Texas Hold'em with AI seat-mates.
+- **The paytables are written** -- Blind, Blind-for-valuables and Trips, as data,
+  with `Rules` selecting between them. The table state machine and the bots are
+  still to come.
 - Nothing SPT-facing exists yet -- no server project, no client plugin, no routes.
 
 ### Open items
 
 - **Write `UltimateHoldemTable`.** The deal order, the three decision points and
   the three-bet settlement. This is the next real piece of work.
-- **Set the paytables and the wallet ceilings together**, using the worst-case
-  table above. They are one decision, not two.
+- **Set the wallet ceilings** from `Rules.WorstCaseReturnPerAnte` -- 511 antes on
+  the standard table, 14 on the capped one -- once `Wallets.cs` is ported. The
+  ceiling is a question about free grid cells, not about what the house can afford.
+- **Decide how many seats the table has**, and **fix the deal order**, before any
+  test pins a stacked deck. Changing either later invalidates every pinned deal at
+  once.
 - **Build the bots** once the table exists -- strategy table, personality dials,
   injectable RNG, a log line per decision, and a test that they never touch `IBank`.
 - Port `Bank`, `ProfileGateway`, `EscrowStore`, `StatsStore`, `BlackjackLog` and
