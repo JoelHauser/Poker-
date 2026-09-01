@@ -16,85 +16,76 @@ diary. **Update "Current state" when you finish a piece of work.**
 
 ---
 
-## The variant: Ultimate Texas Hold'em, with AI seat-mates
+## The variant: no-limit Texas Hold'em against bots
 
-**Decided.** This was the open question that shaped everything else and it is now
-settled.
+**Decided, after two reversals.** Read the history before reopening it, because the
+same argument has now been had three times.
 
-The constraint that drove it: poker needs opponents, and SPT is a single-player
-offline server. UTH answers that by being **house-banked** -- every seat plays its
-own hand against a dealer who follows a fixed qualifying rule, so there is no
-opponent AI standing between the mod and a working game. It still reads as poker on
-screen: hole cards, community cards, real decisions about when and how much to bet.
+The mod is a **Texas Hold'em cash game against AI opponents**. There is a pot, the
+bots bet into it, and the player wins their chips or loses their own.
 
-**The AI players are seat-mates, not opponents.** They sit at the other seats,
-receive their own hole cards from the same deck, share the same community cards and
-the same dealer hand, and play their own hands against the dealer. They can neither
-win nor lose the player's money. They exist for pacing, reactions and the feeling of
-a table.
+It was Ultimate Texas Hold'em for a while and a working UTH table was built and
+tested before the decision changed -- see "Parked: the Ultimate Texas Hold'em
+build". The thing that settled it: **UTH is house-banked and has no pot.** Every
+seat there plays its own hand against the dealer, independently, and two players at
+one table never take a chip from each other. That makes the seat-mates scenery, and
+scenery was not what was wanted. Nobody bluffs anybody in UTH.
 
-This distinction is load-bearing and easy to lose. It was briefly decided the other
-way -- bots contesting a shared pot -- and reversed the same hour, because that is
-not Ultimate Texas Hold'em at all: it is multiway hold'em, the dealer stops being
-the house, and the bot AI becomes the entire project with the SPT integration as a
-footnote. **If a future session finds itself designing bet sizing, position play or
-bluffing, it has drifted off this decision.**
+### The structure
 
-Consequences worth stating plainly:
+- **No-limit**, with bots choosing from a **discrete menu of sizes** -- roughly a
+  third of the pot, two thirds, pot, and all-in. This is how real poker AI is built
+  and it is the difference between a bot that looks like a player and one that
+  gives itself away instantly: naive no-limit sizing is the tell. The player is not
+  restricted to the menu; it exists so the bots have a tractable decision.
+- Small blind and big blind, a button that moves, and the four streets.
+- Up to five seats including the player, as decided for UTH and unchanged.
 
-- **Per-hand settlement survives.** No chips, no buy-in, no session bankroll. The
-  player stakes real currency, the hand resolves, the money comes back. This is
-  Blackjack's model unchanged, which is exactly why the whole money path ports.
-- **Bot money is notional.** It never touches a profile, never becomes an item, and
-  is never persisted. Nothing in `Bank` should ever be called for a bot.
-- **`PotBuilder` is not used.** Side pots exist only where seats contest a shared
-  pot. See "What is done" for what to do with it.
+### Where the money comes from, which is new and matters
 
-### The rules, as this mod will implement them
+**The bots' chips are notional -- a number on screen -- and the player's are real.**
+So when the player drags a pot in, currency is created into their stash, and when
+they lose one it is destroyed. The mod is a faucet and a sink.
 
-Written down because settlement is where a variant is usually got subtly wrong, and
-because half the tables online describe a different Blind paytable.
+This is a real departure and it has two consequences worth being deliberate about:
 
-- **Ante and Blind are equal and mandatory.** **Trips** is an optional side bet.
-- **Play is made exactly once**, and its size depends on when:
+- **There is no fixed house edge any more.** UTH's economics were bounded by
+  arithmetic at 2.185% of the ante. Here the rate at which currency appears is
+  exactly the skill gap between the player and the bots. Beat weak bots and the mod
+  prints roubles indefinitely. That is an accepted consequence of the decision, not
+  an oversight -- but anything that makes the bots weaker also makes the mod a
+  better faucet, which is a strange pressure to have on a difficulty dial.
+- **Blackjack's "no chips, no buy-in" decision does not survive.** Hold'em cannot
+  settle per hand: a stack is what a bet is sized against, what an all-in means, and
+  what decides who is eligible for which side pot. The player **buys in** -- real
+  currency debited, chips on the table -- and **cashes out** at the end.
 
-  | When | Play size |
-  | --- | --- |
-  | On the hole cards, before any community card | 3x or 4x Ante |
-  | After the flop (3 community cards) | 2x Ante |
-  | After the river (all 5) | 1x Ante, or fold |
+  That makes escrow far more load-bearing than it was in Blackjack, and changes what
+  it holds. `EscrowStore` recorded a *stake* until a hand settled. It must now record
+  the player's **current stack**, updated as it changes, because a crash mid-session
+  has to give back what they actually have rather than what they sat down with.
 
-  Checking is free at the first two points. At the river the choice is 1x or fold --
-  there is no third check.
-- **The dealer qualifies with a pair or better**, made from the dealer's two cards
-  and the five community cards. `HandRank` already exposes the category, so this is
-  a comparison and not a special case.
-- **Settlement**, once the hands are compared:
+### What this buys, and what it costs
 
-  | Case | Ante | Play | Blind |
-  | --- | --- | --- | --- |
-  | Player folds | loses | never made | loses |
-  | Beats a qualified dealer | 1:1 | 1:1 | paytable |
-  | Beats a dealer that did not open | **push** | 1:1 | paytable |
-  | Tie | push | push | push |
-  | Loses to a qualified dealer | loses | loses | loses |
-  | Loses to a dealer that did not open | **push** | loses | loses |
+The bots become the product. They can take the player's money, which is the only way
+a seat at a table ever feels like a person -- but it also means a flat bot ruins this
+game far more thoroughly than it would have ruined UTH, where nobody was pretending
+the other seats were players.
 
-  **The Ante pushes on every hand where the dealer fails to open, including one the
-  player lost.** That last row is the one worth writing down: reading the rule as
-  "the Ante pushes when the player wins" is the natural misreading, it looks right
-  in every winning hand you test, and it quietly keeps money that was never the
-  house's.
+They do not have to be *good*, only **believable**, and that is a much lower bar than
+it first appears. Rule-based play over a Monte Carlo equity estimate, with position
+awareness and randomised aggression, reads as human. The expensive foundation for it
+already exists: `HandEvaluator` is exhaustively verified and fast, and Monte Carlo
+equity is built directly on it.
 
-  Trips resolves on the player's own hand and ignores the dealer entirely -- it pays
-  even when the dealer wins, and **a fold does not reach it**.
-- **The Blind pays only on a straight or better**, and pushes below that even on a
-  winning hand. Standard paytable: royal flush 500:1, straight flush 50:1, quads
-  10:1, full house 3:1, flush 3:2, straight 1:1. **See "The payout scale" -- the
-  500:1 is not survivable on every wallet and is capped for valuables.**
-- House edge is about 2.2% of the Ante under correct play. See "Verifying" for why
-  that number cannot be confirmed by simulation at any sane cost.
+### What the decision changed in the code
 
+- **`PotBuilder` is load-bearing again.** It was written first, then spent a day as
+  dead code under UTH, and is now the settlement path. Already mutation-checked,
+  side pots and uncalled-bet refunds included.
+- **The payout-scale problem largely dissolves.** UTH's Blind paid 500:1 and forced
+  ceilings down; a pot cannot pay more than the chips in it. See "The payout scale".
+- The UTH table, its paytables and its strategy are parked, not deleted.
 ## The single most important fact
 
 **SPT 4.x server mods are C#, not TypeScript.** The `mod.ts` / `package.json` /
@@ -111,7 +102,7 @@ means the gate, not a bug in the game code.
 | Project | Owns |
 | --- | --- |
 | `src/Poker.Game` | Rules engine. No SPT reference, no I/O, no clock. |
-| `tests/Poker.Game.Tests` | 145 tests over the evaluator, the pot builder, the log, the paytables, the table and the strategy. |
+| `tests/Poker.Game.Tests` | 145 tests. The evaluator, the pot builder and the log are live; the paytables, table and strategy belong to the parked UTH build. |
 
 Still to come, mirroring Blackjack: `src/Poker.Server`, `src/Poker.Client`,
 `tests/Poker.Server.Tests`, `tools/Poker.Console`, `scripts/smoke.ps1`.
@@ -137,7 +128,7 @@ Line counts are from the working tree, as a sense of what each piece costs.
 | `src/Blackjack.Server/ProfileGateway.cs` | 38 | `HasProfile` / `SaveAsync`. |
 | `src/Blackjack.Server/Abstractions.cs` | 70 | `IBank`, `IProfileGateway`, `IStatsStore`, `IEscrowStore`. The seams that make the service testable with no server. |
 | `src/Blackjack.Server/Wallets.cs` | 90 | Six wallets, templates, symbols, per-wallet limits. **Retune the limits** -- see "The payout scale". |
-| `src/Blackjack.Server/Escrow.cs` | 146 | Records a stake until settlement, refunds orphans on next contact. `Hold` accumulates, which is what UTH's late Play bet needs. |
+| `src/Blackjack.Server/Escrow.cs` | 146 | Records money taken but not settled, and refunds orphans on next contact. **Needs reworking, not just porting** -- it holds a stake, and hold'em needs it to hold the player's live stack. See "Open items". |
 | `src/Blackjack.Server/BlackjackLog.cs` | 75 | Logger with a verbosity switch and the mod folder. See "Logging". |
 | `src/Blackjack.Server/ModMetadata.cs` | 27 | New name and URL; the `~4.1.3` range is unchanged. The GUID is **`com.mybutthasarash.poker`** -- see "Releasing". |
 | `src/Blackjack.Server/Startup.cs` | 50 | Boot banner. Retune the lines it prints. |
@@ -229,26 +220,17 @@ what it did, and shouts when those disagree.
   21 combinations, deliberately: this runs dozens of times a hand, not millions, so
   the only thing worth optimising for is being correct on inspection.
 - `GameLog` -- the engine's logging seam. See "Logging".
-- `Paytable` / `Rules` -- the Blind, the capped Blind and Trips, as data. See "The
-  paytables are data".
-- `UltimateHoldemTable` / `Seat` / `TableView` -- the game. Deals, runs the three
-  decision points, plays the dealer's fixed rule and settles all three bets. See
-  "The table, and the two things fixed inside it".
-- `ISeatAgent` -- where a seat-mate's decision comes from. Its `SeatContext` carries
-  only that seat's own cards, the community cards showing and the legal multiples --
-  never the dealer's hand, the player's, or another seat's. A bot that cannot see
-  those cannot cheat with them.
-- `UthStrategy` -- correct play. See "The strategy, and what the river cost".
-- `SeatMateAgent` / `SeatPersonality` -- the strategy with dials on it. **All seats
-  currently share one agent instance**, so the four seat-mates are one person with
-  four labels. See "They have to feel like real people".
-- `StringEnumListConverter` -- ported from Blackjack, for the list of available
-  actions on the wire.
-- `PotBuilder` -- correct, tested, mutation-checked, and **not used by UTH**. Side
-  pots need a shared pot and UTH has none. It is kept because it costs nothing and a
-  multiway mode may still be wanted one day, but **no settlement code should grow a
-  dependency on it**. If a session finds itself wiring it into a UTH hand, that is
-  the signal something has gone wrong.
+- `PotBuilder` -- splits what every seat committed into a main pot and however many
+  side pots the all-ins require, and returns an uncalled bet rather than potting it.
+  **The settlement path for hold'em.** Written first, spent a day as dead code under
+  UTH, now load-bearing again. Mutation-checked -- see below.
+- `StringEnumListConverter` -- ported from Blackjack, for a list of enums on the
+  wire.
+- The whole Ultimate Texas Hold'em game -- **parked, not on the path**. See "Parked:
+  the Ultimate Texas Hold'em build".
+
+Nothing hold'em-specific exists yet beyond `PotBuilder`. The betting round, the
+blinds, the button, the stacks and the bots are all still to write.
 
 ### The evaluator is trustworthy, and here is why
 
@@ -277,129 +259,88 @@ conserved and still settle to the wrong seat. **The same trap is waiting in UTH
 settlement**, where three bets resolve on different rules and a total can come out
 right with the Blind and the Play swapped.
 
-### The paytables are data, and the reasons are in the code
+## Parked: the Ultimate Texas Hold'em build
 
-`Paytable.cs` holds `Payout` (odds, not a multiplier, so 3:2 stays exact) and the
-three standard tables. `Rules.cs` chooses between them.
+A complete, tested UTH game is in the tree and is **not** on the path any more. It is
+kept rather than deleted because it works and because the decision has moved twice
+already. Do not build on it, and do not let it accrete: nothing new should call into
+it.
 
-Three decisions in there that a reader will otherwise undo:
+`Paytable.cs`, `Rules.cs`, `UltimateHoldemTable.cs`, `Seat.cs`, `TableView.cs`,
+`UthStrategy.cs`, `SeatMateAgent.cs`, plus their tests. Green, mutation-checked, and
+worth reading before writing the hold'em equivalents -- several of its lessons are
+about card games rather than about UTH.
 
-- **A push and a loss are both `Payout` values**, not states the caller tracks. The
-  Blind pushes beneath a straight and Trips loses beneath trips, and settlement code
-  that treats those alike takes money the player was never owed.
-- **The royal row is `RoyalOnly`** and sits above the straight-flush row, because a
-  royal is not a category -- it is an ace-high straight flush. Ignore that flag and
-  every straight flush pays 500:1.
-- **`BlindForValuables` exists for divisibility, not only for size.** Every row pays
-  a whole number on a single unit; the standard table's 3:2 does not, and half a
-  bitcoin does not exist.
+The parts of it that are **not** UTH-specific and should carry across:
 
-Mutation-checked. Each was introduced and the suite caught it: royal row claims
-every straight flush (1 fail), 3:2 rounds half down (1), the Blind loses beneath a
-straight (1), Trips pushes instead of losing (2), a win returns winnings without the
-stake (4), overflow wraps instead of throwing (1).
+- **A fixed, documented deal order, pinned by a test.** Adding a seat changes which
+  cards every later position receives, so a stacked-deck test is pinned to a seat
+  count as well. If the order moves, every pinned deal breaks at once and the
+  failures read as rules bugs. This is just as true in hold'em.
+- **Hidden cards are absent from the view, not blanked.** Anything sent to the client
+  is knowable by the client.
+- **Conservation is necessary and nowhere near sufficient.** Money can be conserved
+  and still settle to the wrong seat -- see the pot builder note above.
+- **Mutation-check anything that ranks a hand or moves money.** Every settlement
+  rule in the UTH table was introduced as a deliberate fault and caught: the Ante
+  pushing only on a won hand (1 fail), the Blind paytable consulted on a tie (1),
+  folding taking the Trips bet (1), a winning bet returning winnings without its
+  stake (2), the dealer needing better than a pair (3), a third check at the river
+  (1), the dealer dealt before the seats (5), hole cards visible from the deal (1).
 
-`NoTableEverPaysLessForABetterHand` is the one to keep when the tables are retuned.
-A mistyped row is invisible to every single-hand test around it and shows up only as
-one hand paying worse than a hand it beats.
+The UTH-specific knowledge, compressed, in case it is ever picked up again:
 
-## The table, and the two things fixed inside it
+- Settlement is three bets on three rules. The Ante pushes whenever the dealer fails
+  to open, **including on a hand the seat lost** -- the natural misreading looks
+  right in every winning hand anyone would test. The Blind pays its table on a win,
+  pushes on a tie, and pushes rather than paying beneath a straight. Trips ignores
+  the dealer and survives a fold.
+- Paytables are data, not code, so the capped valuables table is a different table
+  rather than a second path through settlement. A push and a loss are both `Payout`
+  values for the same reason.
+- **The river is computed, not looked up, and that was worth six points of house
+  edge.** A rule of thumb -- bet a hidden pair or better, else fold -- folded 26% of
+  hands where the real game folds about 19%, and each of those folds threw away two
+  antes. Measured edge 8.4%. Walking all 990 possible dealer holdings instead gives
+  the exact value of betting, at about four milliseconds a decision.
+- **Folding is the expensive decision and every plausible heuristic forgets it.** A
+  royal on the board cannot be beaten, so every dealer holding ties and betting is
+  worth exactly zero -- and every rule of thumb folds it, which is the worst answer
+  available.
+- The edge still measured 5.4% against a published 2.185%, and the evidence pointed
+  at which hands the pre-flop and flop lookups selected rather than at settlement.
+  Unresolved, and only matters if UTH is revived.
+- **Do not try to confirm a house edge by simulation.** At a standard deviation near
+  4.9 antes a hand, a tenth of a point needs about nine million hands. Measure
+  decision frequencies instead -- they are proportions, they converge in thousands
+  rather than millions, and they are what caught the river bug.
+## The bots
 
-`UltimateHoldemTable` is written and settles all three bets. Two decisions in it are
-now load-bearing for every test in the repo.
+They are opponents now, not scenery, and they are the product. A flat bot ruins this
+game in a way it never could have ruined UTH, where nobody was pretending the other
+seats were players.
 
-**The table seats one to five, the player included**, at `Rules.MaxSeats`. The player
-picks how many are filled. Nothing in the rules cares -- seats never interact -- so
-the real constraints are screen width and the deck, which needs 17 cards at five
-seats. The player is always seat 0; which seat the client *draws* them at is a
-presentation question that does not reach the engine.
-
-**The deal order is the casino rotation**: one card at a time round the seats, the
-dealer last, twice, then the five community cards off the top. Written down because
-it has to be -- adding a seat changes which cards every later position receives, so
-a stacked-deck test is pinned to a seat count as well. If this order ever moves,
-every pinned deal becomes wrong at the same moment, and the failures read as rules
-bugs rather than as a changed deal. Procedures vary between houses; nothing depends
-on which was chosen, only on it never changing.
-
-### The table is mutation-checked too
-
-Each was introduced and the suite caught it: the Ante pushes only on a hand the seat
-won (1 fail), the Blind paytable consulted on a tie (1), folding takes the Trips bet
-with it (1), a winning Play returns winnings without its stake (2), the dealer needs
-better than a pair to open (3), the river offers a third check (1), the dealer dealt
-before the seats (5), every hole card visible from the deal (1).
-
-The first two are the ones to re-run after touching settlement. Both look right in
-every winning hand anyone would think to write down.
-
-## The strategy, and what the river cost
-
-`UthStrategy` is correct play. Pre-flop and the flop are lookups; **the river is
-computed**, and the difference between those two things was worth six points of
-house edge.
-
-The rule of thumb first written for the river -- bet a hidden pair or better,
-otherwise fold -- folded 26% of hands where the real game folds about 19%, and every
-one of those folds threw away two antes. The measured edge came out at 8.4%.
-
-The river does not need a rule of thumb. Every card is out; the only unknown is the
-dealer's two, and there are exactly 990 ways to draw them from the 45 nobody can see.
-Walking all of them gives the exact value of betting, and the comparison against
-folding is then arithmetic. About four milliseconds a decision, which is nothing once
-a hand.
-
-**Folding is the expensive decision in this game and every plausible heuristic
-forgets it.** Giving up costs a flat two antes, so a hand only has to beat that to be
-worth one more. The clearest case: a royal flush on the board cannot be beaten, so
-every dealer holding ties and betting is worth exactly zero -- and every rule of
-thumb ("you have nothing of your own", "you are playing the board") folds it, which
-is the worst answer available. `AnUnbeatableBoardIsBackedEvenThoughItCannotWin` pins
-that.
-
-### The edge is still about three points high, and it is probably the lookups
-
-Measured over 100,000 hands: **5.4%, with a 95% interval of [2.4%, 8.4%]**, against
-a published 2.185%. The interval excludes the published figure, so this is a real gap
-and not sampling noise.
-
-What that gap is **not**, on the evidence: the standard deviation came out at 4.875
-against a published 4.94; the average amount wagered at 4.14 antes against 4.15; the
-dealer opens 82.4% of the time; folded hands settle at exactly -2.000 and pushes at
-exactly 0.000; and every settlement mutation is caught. Settlement is well evidenced.
-
-What is left is **which hands the pre-flop and flop lookups actually select**. The
-frequencies are right to within a point or two, but a range that is slightly wrong in
-composition costs real money while looking correct in a histogram -- raising 4x with
-hands that should check risks four antes at a time. Reconstructing the published
-table from memory is what produced the river bug, so this wants checking against the
-real strategy table rather than another guess.
-
-It does not block anything. The player plays by hand, so this affects the seat-mates
-and any hint feature, not the game's correctness.
-
-## The AI seat-mates
-
-Cheap by construction, and that is the point of choosing UTH.
-
-- **They decide, they do not compete.** A bot needs one function: given its hole
-  cards, whatever community cards are showing and the current street, return Check
-  or a Play bet. Nothing about the player's hand or money enters into it.
-- **UTH strategy is a lookup, not a search.** The published optimal strategy is a
-  set of rules over hole-card classes and board texture. An approximation is fine
-  and arguably better: a bot that always plays perfectly is a bot with no character.
-- **Personality is a dial on that table**, not a different brain -- how loose the 4x
-  range is, whether it takes marginal 2x spots, how often it folds the river. One
-  strategy, a few dials, named seats.
-- **Their RNG must be injectable**, exactly as `Deck`'s is, or bot behaviour cannot
+- **They have to be believable, not good.** Strong poker AI is a research problem;
+  a bot that reads as a person is not. Rule-based play over a Monte Carlo equity
+  estimate, with position awareness and randomised aggression, gets there -- and the
+  expensive part already exists, because `HandEvaluator` is what equity is estimated
+  with.
+- **Bet sizing is the tell.** Naive no-limit bots give themselves away instantly by
+  betting odd amounts. Bots choose from a discrete menu -- about a third of the pot,
+  two thirds, pot, all-in -- which is both how real poker AI works and what makes
+  their bets look considered.
+- **A bot sees only what a player at that seat could see**: its own cards, the board,
+  the betting so far, the stacks. Never another seat's cards and never the deck.
+  Structural, not a promise -- a bot cannot cheat with what it was never handed.
+- **A bot must never call `IBank`.** Their chips are notional. Worth an explicit
+  test.
+- **Their RNG must be injectable**, exactly as `Deck`'s is, or their behaviour cannot
   be pinned in a test.
-- **A bot must never call `IBank`.** Notional money only. Worth an explicit test.
-- **Every bot decision is logged** through `IGameLog`, with the reason. A table of
-  seats that silently do things is untestable and unwatchable; the console tool
-  should be able to print why seat 3 took 4x.
-- **Their hole cards are hidden until showdown**, on the same rule as the dealer's:
-  omitted from the payload entirely rather than blanked. See "Things that will bite
-  you" -- Blackjack learned this on the hole card.
+- **Every decision is logged** with its reason, through `IGameLog`. A table of seats
+  that silently do things is untestable and unwatchable; the console tool has to be
+  able to print why seat 3 shoved.
+- **Hole cards are absent from the view until showdown**, and mucked hands stay
+  absent. Anything sent to the client is knowable by the client.
 
 ### They have to feel like real people. This is a stated requirement, not polish.
 
@@ -447,42 +388,34 @@ None of this belongs in the client. The engine owns behaviour and emits events; 
 client owns rendering and animation. A bot whose personality lives in the UI cannot
 be tested and will not survive the first refactor.
 
-## The payout scale, and the ceilings it forces
+## The payout scale, which hold'em mostly solves
 
-This is the mod's new problem. Blackjack's biggest payout was 1.5:1, so backing
-valuables down to even money was enough. UTH's Blind pays **500:1** on a royal.
+This was the mod's hardest open problem under UTH, where the Blind paid **500:1** on
+a royal and the worst case reached 511 antes -- a payout that has to arrive as items,
+in a stash, at the wallet's `StackMaxSize`.
 
-Worst case per hand, as a multiple of the Ante, since the Play bet can be 4x:
+**A pot cannot pay more than the chips in it.** The most the player can win in a hand
+is the sum of what everyone else put in, which is bounded by the stacks at the table
+and therefore by the buy-in. No paytable, no multiplier, no tail. That removes the
+entire class of problem, and with it the capped valuables paytable that existed to
+work around it.
 
-| Bet | Stake | Returns at most |
-| --- | --- | --- |
-| Ante | A | 2A |
-| Play | 4A | 8A |
-| Blind (500:1) | A | 501A |
-| **Total** | 6A | **511A** |
+What is left is smaller and still real:
 
-That number has to fit in a stash, in items, at the wallet's `StackMaxSize`.
-
-**Decided: valuables get a capped Blind paytable.** Everything above a flush pays
-3:1, so the top of the table stops at 4A rather than 501A and the worst case falls
-to **14A**. The rule is printed on the table rather than hidden in a rounding
-decision, which is the same principle as Blackjack paying naturals at even money in
-valuables. Trips is capped the same way or offered in currency only -- it pays 50:1
-at the top and has the identical problem.
-
-**The ceilings in `Wallets.cs` must come down regardless.** Blackjack's limits were
-written against a 1.5:1 payout and do not survive here:
-
-- **Bitcoin and Lega medals have a `StackMaxSize` of 1** -- one item per unit, one
-  grid cell each. Blackjack's bitcoin ceiling of 10 still gives 140 items under the
-  capped table. An Ante ceiling of 1 or 2 is the honest answer.
-- **Roubles are not automatically safe.** Blackjack's 500,000 maximum against the
-  real 500:1 table is 255 million roubles, which is 255 stacks at a 1,000,000 stack
-  limit -- past what a stash will take, and straight into mail. An Ante ceiling
-  around 50,000 keeps the worst case near 26 stacks.
-- Whatever is chosen, `Bank.Credit`'s shortfall-to-mail path is the backstop, not
-  the plan. Mail has attachment limits too, and "you won, here are 40 letters" is
-  not an outcome.
+- **The buy-in is now the number that sets the ceiling**, not a bet limit. A player
+  who buys in for X can at most cash out X times the number of seats, so the maximum
+  a session can hand back is roughly `buy-in x seats`. That is the figure to size
+  wallet limits against.
+- **Bitcoin and Lega medals still have a `StackMaxSize` of 1** -- one item per unit,
+  one grid cell each. A five-handed table with a 10-bitcoin buy-in can hand back 50
+  coins, which is 50 free grid cells. Tighter than roubles by a long way, and the
+  reason valuables want their own buy-in ceiling.
+- **Chips need a denomination.** Blackjack never had one because it never had chips.
+  A stack of a million roubles cannot be one chip per rouble, so the table needs a
+  chip size -- a big blind, effectively -- and the buy-in has to be a whole number of
+  them. Rounding here is where money goes missing.
+- `Bank.Credit`'s shortfall-to-mail path is still the backstop, not the plan. Mail
+  has attachment limits too, and "you won, here are 40 letters" is not an outcome.
 
 ## Things that will bite you
 
@@ -690,25 +623,22 @@ hand or moves money -- see the evaluator and pot builder notes above for the
 pattern, and port Blackjack's `MoneyInvariantTests` before writing settlement
 rather than after.
 
-**Do not try to confirm the house edge by simulation.** An earlier version of this
-file said to, and it does not work. UTH has a standard deviation near 4.9 antes a
-hand, so pinning a 2.185% edge to within a tenth of a point needs about nine million
-hands. A hundred thousand -- already three and a half minutes -- gives a 95% interval
-six points wide, which cannot tell a correct settlement from one losing three points
-somewhere.
+**Chips are conserved. That is the invariant hold'em has and UTH did not.** Every
+hand starts with a known number of chips at the table and must end with the same
+number: what leaves the stacks equals what the pots pay out plus what is refunded.
+`PotBuilder` already carries the pot half of that -- and its own caveat applies here
+too, that conservation is necessary and nowhere near sufficient, because chips can
+balance and still reach the wrong seat.
 
-Measure the **decision mix** instead. It is a proportion rather than a payoff, so
-three thousand hands pin it to under a point, and it is what caught the river rule
-being wrong. Correct play, for reference:
+Fuzz the betting round rather than the payouts. The bug-dense part of hold'em is not
+settlement, it is **who acts next and when a round closes**: min-raises, an all-in
+that is too small to reopen the action, a blind that is already all-in, everyone
+folding to the big blind. Those are cheap to generate randomly and expensive to
+enumerate by hand.
 
-| | 4x | 2x | 1x | fold | average wagered |
-| --- | --- | --- | --- | --- | --- |
-| Published | ~38% | ~13% | ~29% | ~19.6% | 4.15 antes |
-| This engine | 39.5% | 14.1% | 27.8% | 18.6% | 4.14 antes |
-
-The standard deviation is a second cheap check on the paytables, but it is
-heavy-tailed -- a royal lands about once in thirty thousand hands -- so it reads low
-on any short run and the band around it has to be wide.
+**Do not try to confirm a house edge by simulation**, if a session ever reaches for
+it -- see the note under "Parked" for why. Measure decision frequencies instead;
+they are proportions and converge in thousands rather than millions.
 
 On a machine with SPT, `scripts\smoke.ps1 -SessionId <id> -PingOnly` first. It
 touches no money and proves the mod loaded, the route is reachable, the session
@@ -735,37 +665,55 @@ Blackjack ships as `com.mybutthasarash.blackjack` on the same rule.
 
 **Update this section as work completes.**
 
-- Working branch **`uth`**, off `main` at `9c4b9e9`.
+- Working branch **`uth`** (named before the variant changed), off `main` at
+  `9c4b9e9`. Pushed to `origin/uth`.
 - `Poker.Game` green at **145 tests** in about 7 seconds, mutation-checked
-  throughout -- evaluator (44), `PotBuilder` (17), the log seam (8), the paytables
-  (16), the table (21) and the strategy (39).
-- **The variant is decided** -- Ultimate Texas Hold'em with AI seat-mates.
-- **The game plays itself.** `UltimateHoldemTable` deals one to five seats, runs the
-  three decision points, plays the dealer's rule and settles all three bets;
-  `SeatMateAgent` fills the other seats and a table can be run to showdown with no
-  input at all.
+  throughout.
+- **The variant is no-limit Texas Hold'em against bots**, decided after two
+  reversals. See the top of this file, and read it before reopening the question.
+- **Nothing hold'em-specific is built yet** beyond `PotBuilder`, which is the
+  settlement path and is already tested. The betting round, blinds, button, stacks
+  and bots are all still to write.
+- A complete UTH game is in the tree and **parked**. It is green and does no harm;
+  nothing new should call into it.
 - Nothing SPT-facing exists yet -- no server project, no client plugin, no routes.
 
 ### Open items
 
-- **Give every seat its own agent.** The table takes one `ISeatAgent` for all of
-  them, so the seat-mates are currently one person wearing four names. This blocks
-  everything under "They have to feel like real people", which is a stated
-  requirement rather than polish.
-- **Then build the dynamism**: persistence between hands, bankrolls that can bust,
-  mood that drifts, engine-emitted reactions, and thinking time taken from how close
-  the river decision was.
-- **Check the pre-flop and flop ranges against a real strategy table.** The edge
-  measures three points high and the evidence points at which hands the lookups
-  select, not at settlement -- see "The strategy, and what the river cost".
-- **Set the wallet ceilings** from `Rules.WorstCaseReturnPerAnte` -- 511 antes on
-  the standard table, 14 on the capped one -- once `Wallets.cs` is ported. The
-  ceiling is a question about free grid cells, not about what the house can afford.
+**The game**
+
+- **Write the betting round.** Blinds, the button, action order, min-raise, and an
+  all-in too small to reopen the action. This is the bug-dense part of hold'em and
+  the next real piece of work -- settlement is comparatively easy and `PotBuilder`
+  already does most of it.
+- **Stacks and a chip denomination.** A stack is what a bet is sized against and what
+  decides side-pot eligibility, so it comes before the bots.
+- **Then the bots**: Monte Carlo equity off `HandEvaluator`, a discrete sizing menu,
+  position awareness, randomised aggression -- and one agent per seat, which the UTH
+  table got wrong.
+- **Then the dynamism** under "They have to feel like real people": persistence
+  between hands, notional stacks that can bust and be replaced, mood that drifts,
+  engine-emitted reactions, and thinking time drawn from how close the decision was.
+- Decide UTH's fate -- delete, ship as a second table, or leave parked. Undecided on
+  purpose; it costs nothing where it is.
+
+**The money**
+
+- **Buy-in and cash-out replace per-hand settlement**, which Blackjack did not have
+  to do. `EscrowStore` must hold the player's **current stack**, updated as it
+  changes, not the amount they sat down with -- a crash mid-session has to return
+  what they actually have.
+- **Set the wallet ceilings from the buy-in**, not from a paytable. The most a
+  session can return is roughly `buy-in x seats`; bitcoin and Lega medals, which do
+  not stack, are the binding constraint.
 - Port `Bank`, `ProfileGateway`, `EscrowStore`, `StatsStore`, `BlackjackLog` and
   `Fakes` from Blackjack largely as-is; they are currency plumbing and carry no
   blackjack rules.
+
+**The client**
+
 - Port `CardView` / `Textures` / `MenuButtonPatch` from `Blackjack.Client`.
-- The wire enums are strings already, with property-level attributes -- see
-  `TableView.cs`. Keep it that way when the server's own contracts are written.
-- Decide whether `PotBuilder` stays. It is correct and free to keep, but it is dead
-  code under UTH and dead code invites someone to use it.
+- The wire enums are strings already, with property-level attributes. Keep it that
+  way when the server's own contracts are written.
+- `tools/Poker.Console` is worth building early: it makes the game playable with no
+  SPT install and is the only practical way to watch bots play thousands of hands.
