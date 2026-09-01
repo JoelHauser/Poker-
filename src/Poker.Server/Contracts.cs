@@ -20,9 +20,9 @@ public record SitRequest : IRequestData
     public int Seats { get; set; } = 4;
 
     /// <summary>Chips each seat starts with. Not currency -- see the note on the service.</summary>
-    public int BuyIn { get; set; } = 5_000;
+    public int BuyIn { get; set; } = 2_000_000;
 
-    public int BigBlind { get; set; } = 50;
+    public int BigBlind { get; set; } = 20_000;
 
     /// <summary>Fixes the shuffle and the characters, so a hand can be got back.</summary>
     public int? Seed { get; set; }

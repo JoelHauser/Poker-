@@ -40,8 +40,8 @@ param(
     [Parameter(Mandatory = $true)][string]$SessionId,
     [string]$Server = "https://127.0.0.1:6969",
     [int]$Seats = 4,
-    [int]$BuyIn = 5000,
-    [int]$BigBlind = 50,
+    [int]$BuyIn = 2000000,
+    [int]$BigBlind = 20000,
     [int]$Hands = 3,
     [switch]$PingOnly
 )

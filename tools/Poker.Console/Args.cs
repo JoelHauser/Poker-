@@ -5,11 +5,11 @@ internal sealed record Options
 {
     public int Seats { get; init; } = 4;
 
-    public int SmallBlind { get; init; } = 25;
+    public int SmallBlind { get; init; } = 10_000;
 
-    public int BigBlind { get; init; } = 50;
+    public int BigBlind { get; init; } = 20_000;
 
-    public int BuyIn { get; init; } = 5_000;
+    public int BuyIn { get; init; } = 2_000_000;
 
     /// <summary>Printed at startup, so any hand can be got back exactly.</summary>
     public int Seed { get; init; } = Environment.TickCount;

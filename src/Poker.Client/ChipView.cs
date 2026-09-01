@@ -50,31 +50,105 @@ namespace Poker.Client
 
         private static string _directory;
 
+        /// <summary>The largest amount every denomination divides into: 5,000.</summary>
+        private const int Unit = 5_000;
+
         /// <summary>
-        /// Breaks an amount into chips, largest first.
+        /// Beyond this many units the exact search is skipped and the biggest chips
+        /// are peeled off first. 100,000 units is 500,000,000 -- far past any pot a
+        /// table with these stakes can hold, and the array behind it is small.
+        /// </summary>
+        private const int MaxUnits = 100_000;
+
+        /// <summary>
+        /// Breaks an amount into the fewest chips that make it exactly.
         ///
-        /// Greedy is exact here because every denomination divides the one above it,
-        /// so there is no amount a greedy pass renders in more chips than necessary.
-        /// Add a denomination that breaks that -- a 20k, say, beneath a 50k -- and
-        /// this needs revisiting.
+        /// **Greedy is wrong for this set.** It is tempting, and it is what this
+        /// first did, but 10,000 does not divide 25,000 -- so a pot of 30,000, which
+        /// is three 10k chips, comes out of a greedy pass as one 25k chip and 5,000
+        /// stranded. The pre-flop pot at these blinds is exactly 30,000, so the very
+        /// first thing anyone sees would have been wrong.
         ///
-        /// Whatever is left under the smallest chip is returned as the remainder
-        /// rather than being rounded away. A table that quietly loses the odd
-        /// thousand is the sort of drift nobody notices until the numbers are far
+        /// The denominations share a highest common factor of 5,000, so the search
+        /// runs in units of that: a few hundred entries for any pot this table can
+        /// hold. Anything not representable -- an amount that is not a whole number
+        /// of 5,000, or a leftover under the smallest chip -- comes back as the
+        /// remainder rather than being rounded away. A table that quietly loses the
+        /// odd thousand is the sort of drift nobody notices until the numbers are far
         /// apart.
         /// </summary>
         internal static List<KeyValuePair<Chip, int>> Breakdown(int amount, out int remainder)
         {
             var stack = new List<KeyValuePair<Chip, int>>();
-            remainder = amount < 0 ? 0 : amount;
+            var left = amount < 0 ? 0 : amount;
 
-            foreach (var chip in Denominations)
+            // Peel the top chip off anything enormous so the search below stays small.
+            // Safe to do greedily: every denomination divides 1,000,000.
+            var biggest = Denominations[0];
+            while (left / Unit > MaxUnits)
             {
-                var count = remainder / chip.Value;
-                if (count > 0)
+                var count = (left - (MaxUnits * Unit)) / biggest.Value;
+                if (count <= 0)
                 {
-                    stack.Add(new KeyValuePair<Chip, int>(chip, count));
-                    remainder -= count * chip.Value;
+                    break;
+                }
+
+                stack.Add(new KeyValuePair<Chip, int>(biggest, count));
+                left -= count * biggest.Value;
+            }
+
+            var units = left / Unit;
+            remainder = left - (units * Unit);
+
+            // Fewest chips for each reachable total, and which chip was taken to get
+            // there, so the counts can be walked back out afterwards.
+            var best = new int[units + 1];
+            var took = new int[units + 1];
+
+            for (var u = 1; u <= units; u++)
+            {
+                best[u] = int.MaxValue;
+                took[u] = -1;
+
+                for (var d = 0; d < Denominations.Length; d++)
+                {
+                    var cost = Denominations[d].Value / Unit;
+                    if (cost > u || best[u - cost] == int.MaxValue)
+                    {
+                        continue;
+                    }
+
+                    if (best[u - cost] + 1 < best[u])
+                    {
+                        best[u] = best[u - cost] + 1;
+                        took[u] = d;
+                    }
+                }
+            }
+
+            // Nothing makes this total exactly -- 5,000 on its own, say. Take what can
+            // be made and report the rest.
+            var reachable = units;
+            while (reachable > 0 && took[reachable] < 0)
+            {
+                reachable--;
+            }
+
+            remainder += (units - reachable) * Unit;
+
+            var counts = new int[Denominations.Length];
+            while (reachable > 0)
+            {
+                var d = took[reachable];
+                counts[d]++;
+                reachable -= Denominations[d].Value / Unit;
+            }
+
+            for (var d = 0; d < Denominations.Length; d++)
+            {
+                if (counts[d] > 0)
+                {
+                    stack.Add(new KeyValuePair<Chip, int>(Denominations[d], counts[d]));
                 }
             }
 

@@ -141,7 +141,7 @@ namespace Poker.Client
 
         private static void Sit()
         {
-            var reply = PokerApi.Sit(seats: 5, buyIn: 5_000, bigBlind: 50);
+            var reply = PokerApi.Sit(seats: 5, buyIn: 2_000_000, bigBlind: 20_000);
 
             if (!Ok(reply))
             {
@@ -212,7 +212,7 @@ namespace Poker.Client
 
             SetStatus(
                 "Not at a table.\n\n"
-                + "Five seats, 5,000 in chips, blinds 25 / 50.\n"
+                + "Five seats, 2,000,000 in chips, blinds 10k / 20k.\n"
                 + "The chips are notional in this build -- nothing is at stake.");
 
             BuildActions(new[]
