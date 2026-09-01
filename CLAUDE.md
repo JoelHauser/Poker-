@@ -103,7 +103,7 @@ means the gate, not a bug in the game code.
 | Project | Owns |
 | --- | --- |
 | `src/Poker.Game` | Rules engine. No SPT reference, no I/O, no clock. |
-| `tests/Poker.Game.Tests` | 163 tests. The evaluator, pot builder, log and hold'em table are live; the paytables, UTH table and strategy are parked. |
+| `tests/Poker.Game.Tests` | 176 tests. The evaluator, pot builder, log, hold'em table and bots are live; the paytables, UTH table and strategy are parked. |
 
 Still to come, mirroring Blackjack: `src/Poker.Server`, `src/Poker.Client`,
 `tests/Poker.Server.Tests`, `tools/Poker.Console`, `scripts/smoke.ps1`.
@@ -236,7 +236,9 @@ what it did, and shouts when those disagree.
 - The whole Ultimate Texas Hold'em game -- **parked, not on the path**. See "Parked:
   the Ultimate Texas Hold'em build".
 
-What is missing is the bots themselves: nothing implements `IPokerAgent` yet.
+- `BotAgent` / `PokerPersonality` / `HandEquity` -- the opponents. Monte Carlo
+  equity, pot odds, position, stack depth and eight characters over one decision
+  procedure. See "How they actually decide".
 
 ## The betting round
 
@@ -402,6 +404,62 @@ seats were players.
   able to print why seat 3 shoved.
 - **Hole cards are absent from the view until showdown**, and mucked hands stay
   absent. Anything sent to the client is knowable by the client.
+
+### How they actually decide
+
+`BotAgent` runs one procedure for every character, weighted by five dials in
+`PokerPersonality`. One procedure and eight sets of dials, never eight procedures:
+a seat that decides by its own logic cannot be debugged, and when two of them
+disagree about a hand there is no way to say which is wrong.
+
+What goes into a decision, which is what a person weighs too:
+
+- **How often the hand wins**, from `HandEquity` -- a Monte Carlo rollout over the
+  unseen cards. It handles any street and any number of opponents in the same code,
+  and it already accounts for the crowd: aces against one player and aces against
+  four are different hands, which is the thing no chart can tell a bot.
+- **The price**, as pot odds. Equity above the price is a call that makes money and
+  below it is one that does not; everything else is an adjustment to one side.
+- **Position**, weighted by the `Positional` dial. Weak players ignore it, which is
+  the most reliable way to spot one.
+- **What is already in**, because chips in the pot change what folding costs.
+- **Stack depth** -- under about ten big blinds a seat starts shoving, and the
+  `Risk` dial decides how early.
+- **How many opponents are still live**, which throttles bluffing hard.
+
+The dials are `Tightness`, `Aggression`, `Bluff`, `Risk` and `Positional`, each 0 to
+1. Measured over sixty hands apiece, facing a bet:
+
+| | folds | calls | raises |
+| --- | --- | --- | --- |
+| Rock | 78% | 18% | 4% |
+| Owl | 73% | 20% | 7% |
+| Grinder | 67% | 20% | 13% |
+| Shark | 55% | 26% | 19% |
+| Tourist | 47% | 45% | 8% |
+| Station | 42% | 57% | 2% |
+| Gambler | 35% | 36% | 29% |
+| Maniac | 27% | 33% | 40% |
+
+**The spans on the dials matter more than their midpoints**, and both had to be
+widened after measurement. At the first attempt a rock folded 15% and a calling
+station 11%, and a merely ordinary player raised as rarely as a station -- that is
+not eight characters, it is one character with eight names. If a dial is retuned,
+re-measure this table rather than trusting that it still separates.
+
+### Three things about testing bots that cost time here
+
+- **Measure decisions where money was actually asked for.** Most of what a seat does
+  is check into pots nobody bet, and averaging over all of it drowns every
+  difference. "How often it folds when asked" is both the number that separates the
+  characters and the one a person at the table would notice.
+- **Top the stacks up between hands when measuring style.** The maniac busted a
+  third of the way through its sample and took the sample with it. True to life,
+  useless as a measurement.
+- **A five-seat table is not a five-handed pot.** Bluffing frequency is conditioned
+  on *live* opponents, and by the time anyone checks after the flop most of the table
+  has folded -- so a test that varies the seat count measures almost nothing (48%
+  against 46%). Condition on what the rule actually reads.
 
 ### They have to feel like real people. This is a stated requirement, not polish.
 
@@ -676,7 +734,7 @@ These were settled there against the real client and apply unchanged.
 ## Verifying
 
 ```
-dotnet test    # 163 tests, no SPT needed. About 8s -- the parked UTH simulation dominates.
+dotnet test    # 176 tests, no SPT needed. About 8s.
 ```
 
 **Distrust a suite that passes first time.** Mutation-check anything that ranks a
@@ -728,14 +786,14 @@ Blackjack ships as `com.mybutthasarash.blackjack` on the same rule.
 
 - Working branch **`uth`** (named before the variant changed), off `main` at
   `9c4b9e9`. Pushed to `origin/uth`.
-- `Poker.Game` green at **163 tests** in about 8 seconds, mutation-checked
+- `Poker.Game` green at **176 tests** in about 8 seconds, mutation-checked
   throughout.
 - **The variant is no-limit Texas Hold'em against bots**, decided after two
   reversals. See the top of this file, and read it before reopening the question.
-- **The hold'em table is built and tested.** Button, blinds, four streets, a full
-  no-limit betting round with min-raises and short all-ins, side pots, split pots and
-  showdown. Chip conservation is fuzzed across two to five seats. What is missing is
-  the bots: nothing implements `IPokerAgent`.
+- **The game is playable end to end in the engine.** The table deals, bets and
+  settles; eight distinct characters fill the other seats and a five-handed table
+  runs itself. What is missing is everything outside `Poker.Game`: no server, no
+  client, no console.
 - A complete UTH game is in the tree and **parked**. It is green and does no harm;
   nothing new should call into it.
 - Nothing SPT-facing exists yet -- no server project, no client plugin, no routes.
@@ -744,9 +802,9 @@ Blackjack ships as `com.mybutthasarash.blackjack` on the same rule.
 
 **The game**
 
-- **Write the bots.** Monte Carlo equity off `HandEvaluator`, a discrete sizing menu,
-  position awareness, randomised aggression. `IPokerAgent` is the seam and the table
-  already drives one instance per seat.
+- **Give the bots a life between hands** -- the dynamism requirement below. They
+  play well enough now; what they do not have is memory, a bankroll that can bust,
+  or a mood that moves.
 - **A chip denomination**, so a buy-in in roubles becomes a whole number of chips.
   Rounding at that boundary is where money goes missing.
 - **Busting and re-seating.** `StartHand` refuses to deal to a seat with no chips,

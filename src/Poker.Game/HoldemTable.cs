@@ -414,6 +414,7 @@ public sealed class HoldemTable
                     .Select(other => new OpponentView(
                         other.Index, other.Name, other.Stack, other.CommittedThisStreet, other.Folded, other.IsAllIn))
                     .ToList(),
+                SeatsToActAfter(seat),
                 _rules));
 
             Apply(seat, Legalise(seat, decision, options), options);
@@ -607,6 +608,27 @@ public sealed class HoldemTable
             ordered[i].Stack++;
             ordered[i].Won++;
         }
+    }
+
+    /// <summary>
+    /// How many seats still able to act come after this one on this street.
+    ///
+    /// Counted from the seat that opens the street rather than from the button,
+    /// because that is what position actually amounts to once folds are in: a seat
+    /// nominally in early position is last to speak if everyone between has passed.
+    /// </summary>
+    private int SeatsToActAfter(HoldemSeat seat)
+    {
+        var opener = Street == HoldemStreet.PreFlop ? FirstToActPreFlop : FirstToActAfterFlop;
+
+        var order = Enumerable.Range(0, _seats.Count)
+            .Select(offset => _seats[(opener + offset) % _seats.Count])
+            .Where(other => other.CanAct)
+            .ToList();
+
+        var place = order.FindIndex(other => other.Index == seat.Index);
+
+        return place < 0 ? 0 : order.Count - 1 - place;
     }
 
     private void AdvanceActor() => _actor = NextWhoCanAct(SeatAfter(_actor));

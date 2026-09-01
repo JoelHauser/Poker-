@@ -90,6 +90,16 @@ public sealed record BettingOptions(
 /// The other seats as they can be seen from across the table: stacks, what they have
 /// put in, and whether they are still in. Never their cards.
 /// </param>
+/// <param name="SeatsToActAfter">
+/// How many live seats still have to speak after this one on this street. Zero means
+/// acting last, which is worth real money -- everyone else has already told you
+/// something and you have told them nothing.
+///
+/// Given as a count rather than as the button's position because that is the thing
+/// position actually *is*, once folds are taken into account. A seat two to the
+/// button's left is nominally early and is last to act if everyone between has
+/// folded.
+/// </param>
 /// <param name="Rules">Blinds and limits.</param>
 public readonly record struct PokerContext(
     HoldemSeat Seat,
@@ -98,6 +108,7 @@ public readonly record struct PokerContext(
     BettingOptions Options,
     int Pot,
     IReadOnlyList<OpponentView> Opponents,
+    int SeatsToActAfter,
     HoldemRules Rules);
 
 /// <summary>One other seat, as much of it as anybody at the table can see.</summary>
