@@ -129,6 +129,7 @@
   <ItemGroup>
     <TableArt Include="assets\table.png" />
     <CardArt Include="assets\cards\*.png" />
+    <ChipArt Include="assets\chips\*.png" />
   </ItemGroup>
 
   <Target Name="DeployToSPT" AfterTargets="Build" Condition="'$(DeployToSPT)' == 'true'">
@@ -136,6 +137,7 @@
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(SPTPath)\BepInEx\plugins\Poker" />
     <Copy SourceFiles="@(TableArt)" DestinationFolder="$(SPTPath)\BepInEx\plugins\Poker" />
     <Copy SourceFiles="@(CardArt)" DestinationFolder="$(SPTPath)\BepInEx\plugins\Poker\cards" />
+    <Copy SourceFiles="@(ChipArt)" DestinationFolder="$(SPTPath)\BepInEx\plugins\Poker\chips" />
     <Message Importance="high" Text="Deployed $(TargetFileName) + art to $(SPTPath)\BepInEx\plugins\Poker" />
   </Target>
 

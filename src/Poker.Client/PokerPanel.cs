@@ -45,7 +45,7 @@ namespace Poker.Client
         private static RectTransform _seatColumn;
         private static RectTransform _actionRow;
         private static TextMeshProUGUI _status;
-        private static TextMeshProUGUI _potLabel;
+        private static RectTransform _potHolder;
 
         // What the player is asking to raise to. Held between redraws because the
         // whole action strip is rebuilt whenever the view changes.
@@ -428,12 +428,28 @@ namespace Poker.Client
             }
         }
 
+        /// <summary>
+        /// The pot, drawn as chips. Rebuilt each view rather than mutated, the same
+        /// as the board and the action strip: it changes on nearly every action.
+        /// </summary>
         private static void SetPot(int? pot)
         {
-            if (_potLabel != null)
+            if (_potHolder == null)
             {
-                _potLabel.text = pot.HasValue && pot.Value > 0 ? $"POT  {pot.Value:N0}" : string.Empty;
+                return;
             }
+
+            for (var i = _potHolder.childCount - 1; i >= 0; i--)
+            {
+                UnityEngine.Object.Destroy(_potHolder.GetChild(i).gameObject);
+            }
+
+            if (!pot.HasValue || pot.Value <= 0)
+            {
+                return;
+            }
+
+            ChipView.Build(_potHolder, pot.Value, _font, size: 46f);
         }
 
         private static void ClearSeats()
@@ -543,12 +559,18 @@ namespace Poker.Client
             row.childControlWidth = false;
             row.childControlHeight = false;
 
-            _potLabel = NewText("Pot", felt, string.Empty, 26f, TextAlignmentOptions.Center);
-            _potLabel.rectTransform.anchorMin = _potLabel.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
-            _potLabel.rectTransform.pivot = new Vector2(0.5f, 0.5f);
-            _potLabel.rectTransform.sizeDelta = new Vector2(400f, 40f);
-            _potLabel.rectTransform.anchoredPosition = new Vector2(0f, -76f);
-            _potLabel.color = Gold;
+            _potHolder = NewBox("Pot", felt, Color.clear);
+            _potHolder.anchorMin = _potHolder.anchorMax = new Vector2(0.5f, 0.5f);
+            _potHolder.pivot = new Vector2(0.5f, 0.5f);
+            _potHolder.sizeDelta = new Vector2(460f, 52f);
+            _potHolder.anchoredPosition = new Vector2(0f, -78f);
+
+            var potRow = _potHolder.gameObject.AddComponent<HorizontalLayoutGroup>();
+            potRow.childAlignment = TextAnchor.MiddleCenter;
+            potRow.childForceExpandWidth = false;
+            potRow.childForceExpandHeight = false;
+            potRow.childControlWidth = false;
+            potRow.childControlHeight = false;
 
             SetBoard(null);
         }
