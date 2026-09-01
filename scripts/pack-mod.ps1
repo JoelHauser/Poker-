@@ -99,7 +99,20 @@ Write-Host "Packed $archive" -ForegroundColor Green
 if ($InstallPath) {
     if (-not (Test-Path $InstallPath)) { throw "No such install: $InstallPath" }
 
-    $target = Join-Path $InstallPath 'user/mods/Poker'
+    # The server lives in a subfolder of the install, not at its root: 4.1.x ships it
+    # as SPT_Runtime\ and older layouts as SPT\. Joining 'user/mods' straight onto the
+    # install path silently creates a folder nothing ever reads, and a mod that never
+    # loads looks exactly like a mod that loaded and did nothing.
+    $runtime = @('SPT_Runtime', 'SPT') |
+        ForEach-Object { Join-Path $InstallPath $_ } |
+        Where-Object { Test-Path (Join-Path $_ 'SPTarkov.Server.Core.dll') } |
+        Select-Object -First 1
+
+    if (-not $runtime) {
+        throw "No SPT server found under '$InstallPath' -- looked for SPT_Runtime\ and SPT\ containing SPTarkov.Server.Core.dll."
+    }
+
+    $target = Join-Path $runtime 'user/mods/Poker'
     New-Item -ItemType Directory -Force -Path $target | Out-Null
     Copy-Item (Join-Path $modFolder '*') -Destination $target -Force
 

@@ -1,0 +1,409 @@
+﻿using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
+using EFT.UI;
+using HarmonyLib;
+using TMPro;
+using UnityEngine;
+using UnityEngine.Events;
+using UnityEngine.UI;
+
+namespace Poker.Client
+{
+    /// <summary>
+    /// Puts a BLACKJACK button on the main menu, beside the ones already there.
+    ///
+    /// The menu rather than the hideout, deliberately. The Rest Space was the obvious
+    /// home, and EFT even has a game-disc system sitting in it, but the part that can
+    /// play a game needs Rest Space 2, a generator and burning fuel, which locks a new
+    /// profile out of the mod entirely. A menu button works on a profile five minutes
+    /// old.
+    ///
+    /// The button is a clone of one of the menu's own, and that is what makes it fit
+    /// alongside other menu mods rather than in spite of them. See <see cref="Install"/>.
+    /// </summary>
+    internal static class MenuButtonPatch
+    {
+        private const string ButtonName = "PokerButton";
+
+        [HarmonyPatch(typeof(MenuScreen), nameof(MenuScreen.Awake))]
+        [HarmonyPostfix]
+        // ReSharper disable once InconsistentNaming
+        private static void AfterAwake(MenuScreen __instance) => Schedule(__instance);
+
+        [HarmonyPatch(typeof(MenuScreen), nameof(MenuScreen.Show), typeof(MenuScreen.MainMenuBaseScreenController))]
+        [HarmonyPostfix]
+        // ReSharper disable once InconsistentNaming
+        private static void AfterShow(MenuScreen __instance) => Schedule(__instance);
+
+        /// <summary>
+        /// Rebuilds at the end of the frame rather than immediately.
+        ///
+        /// This is the whole integration story with menu mods. MoxoPixel's Menu
+        /// Overhaul restyles the main menu from a hardcoded list of five buttons --
+        /// PlayButton, CharacterButton, TradeButton, HideoutButton, ExitButtonGroup --
+        /// hiding each one's background, activating its icon and nudging it sideways by
+        /// a per-button offset from its own config. A sixth button cannot be in that
+        /// list, and asking to be added to it is not something this mod can do.
+        ///
+        /// It does not have to be. Waiting until every other Awake and Show handler has
+        /// run means the button we copy has already been restyled, so the copy inherits
+        /// the styling exactly -- background hidden, icon state, label size, whatever
+        /// the other mod decided. Cloning early got a vanilla-looking button sitting
+        /// next to five restyled ones, which is what looked wrong.
+        ///
+        /// It also means this needs no knowledge of that mod at all: anything that
+        /// restyles the hideout button, now or later, is inherited for free.
+        /// </summary>
+        private static void Schedule(MenuScreen screen)
+        {
+            if (screen == null || PokerClientPlugin.Instance == null)
+            {
+                return;
+            }
+
+            PokerClientPlugin.Instance.StartCoroutine(InstallAtEndOfFrame(screen));
+        }
+
+        private static IEnumerator InstallAtEndOfFrame(MenuScreen screen)
+        {
+            yield return new WaitForEndOfFrame();
+
+            try
+            {
+                Install(screen);
+            }
+            catch (Exception ex)
+            {
+                // A missing button is a disappointment. A menu that fails to build is a
+                // game that does not start, so this never rethrows.
+                PokerClientPlugin.Log.LogError("[Poker] could not add the menu button: " + ex);
+            }
+        }
+
+        private static void Install(MenuScreen screen)
+        {
+            if (screen == null)
+            {
+                return;
+            }
+
+            var template = FindTemplate(screen);
+            if (template == null)
+            {
+                PokerClientPlugin.Log.LogWarning(
+                    "[Poker] no menu button to clone from; the menu's layout has changed.");
+                return;
+            }
+
+            // Thrown away and cloned again rather than adjusted in place. Whatever
+            // another mod did to the template between then and now is inherited by
+            // copying it afresh, and there is no state of ours to get out of step.
+            var existing = FindOurs(screen);
+            if (existing != null)
+            {
+                UnityEngine.Object.DestroyImmediate(existing.gameObject);
+            }
+
+            var clone = UnityEngine.Object.Instantiate(template.gameObject, template.transform.parent, false);
+            clone.name = ButtonName;
+            clone.transform.SetSiblingIndex(template.transform.GetSiblingIndex() + 1);
+
+            var button = clone.GetComponent<DefaultUIButton>();
+            if (button == null)
+            {
+                PokerClientPlugin.Log.LogWarning("[Poker] the clone has no DefaultUIButton.");
+                UnityEngine.Object.Destroy(clone);
+                return;
+            }
+
+            Relabel(button, "POKER");
+            ReplaceIcon(button);
+            button.Interactable = true;
+            Wire(button);
+            Follow(button, template);
+
+            PokerClientPlugin.Log.LogInfo($"[Poker] menu button added, cloned from '{template.name}'");
+        }
+
+        /// <summary>
+        /// Renames the button without undoing anyone's styling.
+        ///
+        /// SetHeaderText re-applies the button's own font size, which throws away a
+        /// size another mod set on the label. Putting it back afterwards keeps our
+        /// button the same size as its neighbours.
+        /// </summary>
+        private static void Relabel(DefaultUIButton button, string text)
+        {
+            var label = button.GetComponentInChildren<TextMeshProUGUI>(true);
+            var size = label != null ? label.fontSize : 0f;
+
+            button.SetHeaderText(text);
+
+            if (label != null && size > 0f)
+            {
+                label.fontSize = size;
+            }
+        }
+
+        /// <summary>
+        /// Swaps the borrowed icon for a diamond.
+        ///
+        /// A clone wears whatever icon it copied, so without this the BLACKJACK button
+        /// carries the hideout's. Blanking it is not the answer either: with a menu mod
+        /// installed the icon is the button's main visual and the others would all have
+        /// one, leaving ours conspicuously bare. A suit is drawn by the same code that
+        /// draws the cards, so it needs no art shipped and looks deliberate either way.
+        ///
+        /// The diamond specifically, because it is the only suit with no up or down. A
+        /// spade inheriting a mirrored or rotated transform from the icon it replaced
+        /// comes out looking like a trophy; a rhombus cannot.
+        ///
+        /// The container is left alone whatever happens, because its size is part of
+        /// the row's spacing.
+        /// </summary>
+        private static void ReplaceIcon(DefaultUIButton button)
+        {
+            var icons = button.GetComponentsInChildren<Image>(true)
+                .Where(i => i != null && i.name.IndexOf("icon", StringComparison.OrdinalIgnoreCase) >= 0)
+                .ToList();
+
+            if (icons.Count == 0)
+            {
+                return;
+            }
+
+            var pip = Textures.Suit('D', Color.white);
+
+            foreach (var icon in icons)
+            {
+                var rect = icon.rectTransform;
+
+                // Whatever the borrowed icon was, it may have been rotated or mirrored
+                // to suit its own artwork, and a spade inherits that and comes out
+                // upside down. Reported as well as reset, because a rotation here is
+                // worth knowing about rather than silently undoing.
+                if (rect.localRotation != Quaternion.identity ||
+                    rect.localScale.x < 0f || rect.localScale.y < 0f)
+                {
+                    PokerClientPlugin.Log.LogInfo(
+                        $"[Poker] icon '{icon.name}' had rotation {rect.localEulerAngles} " +
+                        $"scale {rect.localScale}; normalising.");
+                }
+
+                rect.localRotation = Quaternion.identity;
+                rect.localScale = new Vector3(
+                    Mathf.Abs(rect.localScale.x),
+                    Mathf.Abs(rect.localScale.y),
+                    Mathf.Abs(rect.localScale.z));
+
+                icon.sprite = pip;
+                icon.preserveAspect = true;
+            }
+        }
+
+        /// <summary>
+        /// Attaches the click handler.
+        ///
+        /// Not a UnityEngine.UI.Button: EFT's DefaultUIButton descends from
+        /// ButtonFeedback, which implements IPointerClickHandler itself and exposes a
+        /// plain UnityEvent field called OnClick. Looking for a Button component finds
+        /// nothing, which is exactly what the first attempt did -- the button appeared,
+        /// looked right, and did nothing at all when clicked.
+        ///
+        /// Clearing first matters as much as adding: a clone carries the original's
+        /// listeners, so without this BLACKJACK would open the hideout.
+        /// </summary>
+        private static void Wire(DefaultUIButton button)
+        {
+            var field = AccessTools.Field(typeof(DefaultUIButton), "OnClick");
+            if (field?.GetValue(button) is not UnityEvent onClick)
+            {
+                PokerClientPlugin.Log.LogWarning(
+                    "[Poker] DefaultUIButton has no OnClick event; the button will do nothing.");
+                return;
+            }
+
+            onClick.RemoveAllListeners();
+            onClick.AddListener(OnClicked);
+        }
+
+        /// <summary>
+        /// Sits our button one row under the template, matching whatever position and
+        /// size it currently has -- including any sideways offset a menu mod applied,
+        /// since that is baked into the template by the time this runs.
+        /// </summary>
+        private static void Follow(DefaultUIButton ours, DefaultUIButton template)
+        {
+            var mine = ours.GetComponent<RectTransform>();
+            var theirs = template.GetComponent<RectTransform>();
+            if (mine == null || theirs == null)
+            {
+                return;
+            }
+
+            // If the menu arranges its buttons with a layout group, it will place this
+            // one too, and anything set here would be overwritten on the next rebuild
+            // anyway. Sibling order is the only thing worth saying in that case.
+            if (ours.transform.parent != null &&
+                ours.transform.parent.GetComponent<LayoutGroup>() != null)
+            {
+                ours.transform.SetSiblingIndex(template.transform.GetSiblingIndex() + 1);
+                return;
+            }
+
+            mine.anchorMin = theirs.anchorMin;
+            mine.anchorMax = theirs.anchorMax;
+            mine.pivot = theirs.pivot;
+            mine.sizeDelta = theirs.sizeDelta;
+            mine.localScale = theirs.localScale;
+
+            // One row below the lowest button, measured in world space.
+            //
+            // Local positions cannot be compared here. The exit entry is a group with
+            // the button nested inside it, so its anchoredPosition is relative to that
+            // group rather than to the menu, and reading them as if they shared a
+            // parent put BLACKJACK straight on top of EXIT. World positions are the
+            // only ones that mean the same thing for every button.
+            // Measured once per menu, then remembered.
+            //
+            // WorldRows excludes our own button but not another mod's, and we sit one
+            // row under the lowest of them. Install runs again on every Awake and every
+            // Show, so with a second mod doing the same thing the two leapfrog: we
+            // measure against where they are now and drop below it, they measure
+            // against where we just went and drop below that, and the pair walks off
+            // the bottom of the menu a row per cycle. With only one such mod installed
+            // it never showed, because a mod's own button is excluded from its own
+            // measurement, so the lowest row stayed the exit group forever.
+            //
+            // Remembering the first answer breaks the loop from our side: wherever we
+            // land is where we stay, so nobody else's placement moves on our account.
+            var container = theirs.parent;
+
+            if (!_hasPlacement || !ReferenceEquals(_placedUnder, container))
+            {
+                var rows = WorldRows(template, ours);
+                if (rows.Count == 0)
+                {
+                    mine.anchoredPosition = theirs.anchoredPosition;
+                    return;
+                }
+
+                _placedY = rows[rows.Count - 1] - MedianGap(rows, theirs);
+                _placedUnder = container;
+                _hasPlacement = true;
+            }
+
+            mine.position = new Vector3(theirs.position.x, _placedY, theirs.position.z);
+            ours.transform.SetAsLastSibling();
+        }
+
+        /// <summary>
+        /// The row container the remembered placement was measured against, so a menu
+        /// that has been rebuilt is measured afresh rather than reusing a coordinate
+        /// from one that no longer exists.
+        /// </summary>
+        private static Transform _placedUnder;
+
+        private static float _placedY;
+
+        private static bool _hasPlacement;
+
+        /// <summary>
+        /// The world Y of every visible menu button, ours excluded, highest first.
+        ///
+        /// Rows closer together than a few pixels are treated as one, since a button
+        /// and a label of its own can sit at almost the same height without being two
+        /// entries.
+        /// </summary>
+        private static List<float> WorldRows(DefaultUIButton template, DefaultUIButton ours)
+        {
+            var parent = template.transform.parent;
+            if (parent == null)
+            {
+                return new List<float>();
+            }
+
+            var ys = parent.GetComponentsInChildren<DefaultUIButton>(true)
+                .Where(b => b != null && b.name != ButtonName && b != ours && b.gameObject.activeInHierarchy)
+                .Select(b => b.GetComponent<RectTransform>())
+                .Where(r => r != null)
+                .Select(r => r.position.y)
+                .OrderByDescending(y => y)
+                .ToList();
+
+            var rows = new List<float>();
+            foreach (var y in ys)
+            {
+                if (rows.Count == 0 || Mathf.Abs(rows[rows.Count - 1] - y) > 4f)
+                {
+                    rows.Add(y);
+                }
+            }
+
+            return rows;
+        }
+
+        /// <summary>
+        /// The spacing between adjacent rows: the median of the real gaps, not the
+        /// first one found. The first is whichever odd pair comes back first, and this
+        /// menu has an exit entry that is a group rather than a plain button.
+        /// </summary>
+        private static float MedianGap(List<float> rows, RectTransform template)
+        {
+            var gaps = new List<float>();
+            for (var i = 1; i < rows.Count; i++)
+            {
+                var gap = Mathf.Abs(rows[i - 1] - rows[i]);
+                if (gap > 1f)
+                {
+                    gaps.Add(gap);
+                }
+            }
+
+            if (gaps.Count > 0)
+            {
+                gaps.Sort();
+                return gaps[gaps.Count / 2];
+            }
+
+            // Nothing to measure: fall back to the template's own height in world units.
+            var corners = new Vector3[4];
+            template.GetWorldCorners(corners);
+            var height = Mathf.Abs(corners[1].y - corners[0].y);
+            return height > 1f ? height : 46f;
+        }
+
+        private static DefaultUIButton FindOurs(MenuScreen screen) =>
+            screen.GetComponentsInChildren<DefaultUIButton>(true)
+                .FirstOrDefault(b => b != null && b.name == ButtonName);
+
+        /// <summary>
+        /// A button to copy. The hideout button, because it is always present and never
+        /// contextual -- the play button changes with matchmaking state and the exit
+        /// button is a group rather than a plain button in at least one menu mod.
+        /// </summary>
+        private static DefaultUIButton FindTemplate(MenuScreen screen)
+        {
+            var buttons = screen.GetComponentsInChildren<DefaultUIButton>(true)
+                .Where(b => b != null && b.name != ButtonName)
+                .ToList();
+
+            if (buttons.Count == 0)
+            {
+                return null;
+            }
+
+            return buttons.FirstOrDefault(b => b.name.IndexOf("hideout", StringComparison.OrdinalIgnoreCase) >= 0)
+                   ?? buttons.FirstOrDefault(b => b.name.IndexOf("trade", StringComparison.OrdinalIgnoreCase) >= 0)
+                   ?? buttons[0];
+        }
+
+        private static void OnClicked()
+        {
+            PokerClientPlugin.Log.LogInfo("[Poker] menu button clicked");
+            PokerPanel.Toggle();
+        }
+    }
+}

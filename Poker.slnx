@@ -2,6 +2,11 @@
   <Folder Name="/src/">
     <Project Path="src/Poker.Game/Poker.Game.csproj" />
     <Project Path="src/Poker.Server/Poker.Server.csproj" />
+    <!--
+      net472 and referenced straight out of an install, so it is not part of a
+      plain `dotnet build` of the solution on a machine without the game.
+    -->
+    <Project Path="src/Poker.Client/Poker.Client.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Poker.Game.Tests/Poker.Game.Tests.csproj" />
