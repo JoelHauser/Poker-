@@ -171,6 +171,57 @@ public sealed class HoldemTable
         Run();
     }
 
+    /// <summary>
+    /// Buys a broke seat back in, optionally with somebody new sitting down in it.
+    ///
+    /// Kept out of <see cref="StartHand"/> on purpose. Who rebuys, who walks away and
+    /// who takes the empty chair is a policy question -- a cash game tops everyone up,
+    /// a tournament does not, and the mod will want a stranger to sit down rather than
+    /// the same bot to reappear with a fresh stack. The engine refuses to deal to an
+    /// empty seat and lets the caller decide what that means.
+    ///
+    /// **These chips are created.** Nothing else in the engine makes a chip out of
+    /// nothing, so anything counting them has to be told.
+    /// </summary>
+    public void Reseat(int seatIndex, int chips, IPokerAgent? replacement = null, string? name = null)
+    {
+        if (Street is not (HoldemStreet.Idle or HoldemStreet.Showdown))
+        {
+            throw new InvalidOperationException("A seat cannot be bought back in the middle of a hand.");
+        }
+
+        if (chips <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(chips), chips, "A seat needs chips to play.");
+        }
+
+        var seat = _seats[seatIndex];
+
+        if (seat.Stack > 0)
+        {
+            throw new InvalidOperationException($"{seat.Name} still has {seat.Stack} and is not out.");
+        }
+
+        if (replacement is not null && seat.IsPlayer)
+        {
+            throw new InvalidOperationException("The player's seat cannot be handed to an agent.");
+        }
+
+        var replaced = _seats[seatIndex] = new HoldemSeat(seatIndex, seat.IsPlayer, name ?? seat.Name, chips);
+
+        if (replacement is not null)
+        {
+            _agents[seatIndex] = replacement;
+        }
+
+        if (_log.Enabled)
+        {
+            _log.Write(
+                $"table: {replaced.Name} sits down with {chips}"
+                + (replacement is not null ? " (a new face)" : " (bought back in)"));
+        }
+    }
+
     /// <summary>What the seat to act may legally do, and for how much.</summary>
     public BettingOptions Options()
     {
@@ -178,6 +229,34 @@ public sealed class HoldemTable
 
         return OptionsFor(seat);
     }
+
+    /// <summary>
+    /// The seat-to-act's own view of the table -- exactly what a bot in that seat
+    /// would be handed.
+    ///
+    /// Safe to expose: the context carries only that seat's cards and what anybody at
+    /// the table can see. It exists so the console can drive the player's seat with
+    /// an agent, and it is what a hint feature would read.
+    /// </summary>
+    public PokerContext ContextForActor()
+    {
+        var seat = Actor ?? throw new InvalidOperationException($"Nothing to decide while the table is {Street}.");
+
+        return ContextFor(seat);
+    }
+
+    private PokerContext ContextFor(HoldemSeat seat) => new(
+        seat,
+        Street,
+        Community,
+        OptionsFor(seat),
+        Pot,
+        _seats.Where(other => other.Index != seat.Index)
+            .Select(other => new OpponentView(
+                other.Index, other.Name, other.Stack, other.CommittedThisStreet, other.Folded, other.IsAllIn))
+            .ToList(),
+        SeatsToActAfter(seat),
+        _rules);
 
     /// <summary>The player's decision. Bots then act until it is the player's turn again.</summary>
     public void Act(HoldemDecision decision)
@@ -404,21 +483,10 @@ public sealed class HoldemTable
                 return;
             }
 
-            var options = OptionsFor(seat);
-            var decision = _agents[seat.Index].Decide(new PokerContext(
-                seat,
-                Street,
-                Community,
-                options,
-                Pot,
-                _seats.Where(other => other.Index != seat.Index)
-                    .Select(other => new OpponentView(
-                        other.Index, other.Name, other.Stack, other.CommittedThisStreet, other.Folded, other.IsAllIn))
-                    .ToList(),
-                SeatsToActAfter(seat),
-                _rules));
+            var context = ContextFor(seat);
+            var decision = _agents[seat.Index].Decide(context);
 
-            Apply(seat, Legalise(seat, decision, options), options);
+            Apply(seat, Legalise(seat, decision, context.Options), context.Options);
             AdvanceActor();
         }
     }

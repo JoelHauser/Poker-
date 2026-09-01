@@ -103,10 +103,11 @@ means the gate, not a bug in the game code.
 | Project | Owns |
 | --- | --- |
 | `src/Poker.Game` | Rules engine. No SPT reference, no I/O, no clock. |
-| `tests/Poker.Game.Tests` | 186 tests. The evaluator, pot builder, log, hold'em table and bots are live; the paytables, UTH table and strategy are parked. |
+| `tests/Poker.Game.Tests` | 189 tests. The evaluator, pot builder, log, hold'em table and bots are live; the paytables, UTH table and strategy are parked. |
+| `tools/Poker.Console` | Terminal table and soak harness. No SPT needed. See "The harness". |
 
 Still to come, mirroring Blackjack: `src/Poker.Server`, `src/Poker.Client`,
-`tests/Poker.Server.Tests`, `tools/Poker.Console`, `scripts/smoke.ps1`.
+`tests/Poker.Server.Tests`, `scripts/smoke.ps1`.
 
 The engine knows nothing about currency -- it takes an `int` and returns an `int`.
 Everything that maps a `Wallet` to an item template belongs in `Wallets.cs` and
@@ -580,6 +581,53 @@ What is left is smaller and still real:
 - `Bank.Credit`'s shortfall-to-mail path is still the backstop, not the plan. Mail
   has attachment limits too, and "you won, here are 40 letters" is not an outcome.
 
+## The harness
+
+`tools/Poker.Console` plays the engine in a terminal with no SPT install, and points
+it at itself when nobody is playing.
+
+```
+dotnet run --project tools/Poker.Console                        # sit down and play
+dotnet run --project tools/Poker.Console -- --soak 2000 --samples 12
+dotnet run --project tools/Poker.Console -- --seed 1234 -v --peek
+```
+
+`--soak N` puts a bot in every seat, plays N hands and **checks the table's
+invariants after every single action**. `--seed` fixes the shuffle and the characters
+so any hand can be got back; `-v` prints every engine line as it happens; `--peek`
+shows everybody's cards.
+
+The invariant checking is the point, not a decoration:
+
+- **Every line the engine writes is captured whether or not it is printed.** The only
+  run worth having a transcript of is the one that just failed, and by then it is too
+  late to turn logging on. A failure dumps the whole hand.
+- **Checks run after every action, not at the end of the hand.** A betting-round bug
+  shows up as an impossible intermediate state -- an actor who has folded, a minimum
+  raise above the maximum, a stack gone negative -- and by settlement the evidence has
+  been tidied away by the next street.
+- What it checks: chips conserved against a declared expectation, no negative stack,
+  the pot matching the seats, the board matching the street, and the offered options
+  being coherent (nothing to call *and* a call offered, check and call together, a
+  raise range that is not a range, a folded or all-in seat being asked to act).
+- **Re-buying is declared rather than switched off.** `HoldemTable.Reseat` is the one
+  place in the engine that makes chips out of nothing, so the harness tells the
+  watchdog and the conservation check stays live.
+
+4,500 soaked hands across two, three and five seats have not broken one.
+
+### It found something on the first hand it drew
+
+Not in the engine -- in the renderer, which showed a bot's hole cards on a hand that
+ended with everybody folding. There had been no showdown and the cards should never
+have been seen.
+
+The fix is worth carrying into the server's view: **reveal keys off `Hand is not
+null`, never off the street.** The engine fills in `HoldemSeat.Hand` only for seats
+that actually reached a showdown, so it is already saying which hands may be shown.
+Reading `Street == Showdown` instead leaks the winner's cards on every hand that ends
+early -- which is most of them.
+
 ## Things that will bite you
 
 Carried over from Blackjack. Each cost real time there. None are hypothetical, and
@@ -778,7 +826,7 @@ These were settled there against the real client and apply unchanged.
 ## Verifying
 
 ```
-dotnet test    # 186 tests, no SPT needed. About 8s.
+dotnet test    # 189 tests, no SPT needed. About 8s.
 ```
 
 **Distrust a suite that passes first time.** Mutation-check anything that ranks a
@@ -830,14 +878,14 @@ Blackjack ships as `com.mybutthasarash.blackjack` on the same rule.
 
 - Working branch **`uth`** (named before the variant changed), off `main` at
   `9c4b9e9`. Pushed to `origin/uth`.
-- `Poker.Game` green at **186 tests** in about 8 seconds, mutation-checked
+- `Poker.Game` green at **189 tests** in about 8 seconds, mutation-checked
   throughout.
 - **The variant is no-limit Texas Hold'em against bots**, decided after two
   reversals. See the top of this file, and read it before reopening the question.
-- **The game is playable end to end in the engine.** The table deals, bets and
-  settles; eight distinct characters fill the other seats and a five-handed table
-  runs itself. What is missing is everything outside `Poker.Game`: no server, no
-  client, no console.
+- **The game is playable.** `dotnet run --project tools/Poker.Console` deals a real
+  table against seven characters' worth of improvised opponents. The table deals,
+  bets and settles; the bots blend, drift and go broke. What is missing is everything
+  SPT-facing: no server, no client, no routes.
 - A complete UTH game is in the tree and **parked**. It is green and does no harm;
   nothing new should call into it.
 - Nothing SPT-facing exists yet -- no server project, no client plugin, no routes.
@@ -852,9 +900,9 @@ Blackjack ships as `com.mybutthasarash.blackjack` on the same rule.
   how close the decision was. See "They have to feel like real people".
 - **A chip denomination**, so a buy-in in roubles becomes a whole number of chips.
   Rounding at that boundary is where money goes missing.
-- **Busting and re-seating.** `StartHand` refuses to deal to a seat with no chips,
-  deliberately -- who leaves and who sits down is table management and does not
-  belong in the middle of a deal.
+- **Decide the re-seating policy for the mod.** `HoldemTable.Reseat` exists and the
+  console tops everybody up, but a cash game, a tournament and "a stranger sits down"
+  are three different answers and only the engine mechanism is built.
 - **Then the dynamism** under "They have to feel like real people": persistence
   between hands, notional stacks that can bust and be replaced, mood that drifts,
   engine-emitted reactions, and thinking time drawn from how close the decision was.
@@ -879,5 +927,5 @@ Blackjack ships as `com.mybutthasarash.blackjack` on the same rule.
 - Port `CardView` / `Textures` / `MenuButtonPatch` from `Blackjack.Client`.
 - The wire enums are strings already, with property-level attributes. Keep it that
   way when the server's own contracts are written.
-- `tools/Poker.Console` is worth building early: it makes the game playable with no
-  SPT install and is the only practical way to watch bots play thousands of hands.
+- `tools/Poker.Console` is built. Use `--soak` before trusting any change to the
+  betting round, and `--seed` to get a bad hand back.

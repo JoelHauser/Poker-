@@ -212,6 +212,50 @@ public class HoldemTableTests
     }
 
     [Fact]
+    public void ABrokeSeatIsBoughtBackInBetweenHandsAndNotDuringOne()
+    {
+        var table = Table(3, Passive, Passive);
+        table.Seats[1].Stack = 0;
+
+        var before = table.ChipsInPlay;
+        table.Reseat(1, 5_000);
+
+        // Deliberately the one place in the engine that makes chips out of nothing.
+        // Anything counting them has to be told, which is why it is a call rather
+        // than something StartHand does quietly.
+        Assert.Equal(before + 5_000, table.ChipsInPlay);
+        Assert.Equal(5_000, table.Seats[1].Stack);
+
+        table.StartHand();
+        Assert.Throws<InvalidOperationException>(() => table.Reseat(1, 5_000));
+    }
+
+    [Fact]
+    public void ASeatThatStillHasChipsCannotBuyMore()
+    {
+        // Otherwise a bot could quietly top itself up and the faucet would run
+        // without anybody deciding it should.
+        var table = Table(3, Passive, Passive);
+
+        Assert.Throws<InvalidOperationException>(() => table.Reseat(1, 5_000));
+    }
+
+    [Fact]
+    public void SomebodyNewCanTakeTheEmptyChairButNeverThePlayers()
+    {
+        var table = Table(3, Passive, Passive);
+        table.Seats[2].Stack = 0;
+
+        var newcomer = new Bot(_ => HoldemDecision.Fold);
+        table.Reseat(2, 5_000, newcomer, "Stranger");
+
+        Assert.Equal("Stranger", table.Seats[2].Name);
+
+        table.Seats[0].Stack = 0;
+        Assert.Throws<InvalidOperationException>(() => table.Reseat(0, 5_000, newcomer));
+    }
+
+    [Fact]
     public void ASeatCannotPutInMoreThanItHas()
     {
         // Tested directly because no caller currently asks for too much -- the
