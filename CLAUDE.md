@@ -1331,6 +1331,25 @@ reads this first and would have started building one.
 - A complete UTH game is in the tree and **parked**. It is green and does no harm;
   nothing new should call into it.
 
+### What to check first at the home box
+
+Everything below has been compiled and installed and **none of it has been seen**.
+In rough order of how likely it is to be wrong:
+
+1. **The task-bar tab lands in the right group** -- beside MAIN MENU and HIDEOUT, not
+   beside SETTINGS. With Blackjack installed the two should sit next to each other,
+   one spade and one diamond. If ours lands in the wrong half, the spacer's
+   `flexibleWidth` is what `Divider()` looks for.
+2. **`[Poker] client loaded` in `BepInEx\LogOutput.log`.** Its absence points at the
+   `PluginValidator`, not at the code. The shipped plugin was built against EFT
+   `0.16.9.5.40743` on SPT 4.1.3.
+3. **The main-menu button appears.** It has never worked on this EFT build -- the
+   patch did not compile until now -- so this is the first time it can have.
+4. **The pot column, the close fade and the buy-in confirmation**, all unseen.
+5. **Then, and only then, the money.** `-PingOnly` first, then one buy-in on the test
+   profile with the console open. Every `InventoryHelper` call in `Bank` is still code
+   that has never executed on a live server.
+
 ### Open items
 
 **The money -- written, tested on fakes, never run for real**
@@ -1347,15 +1366,41 @@ reads this first and would have started building one.
   read, stack limits reported on first contact, no errors either side. The HTTPS,
   compression and cookie handling in `smoke.ps1` all work as ported.
 - **A registered profile is not a character, and the money path needs a character.**
-  The launcher writes a **369-byte stub** -- `characters.pmc` has no `Info` and no
-  real inventory, because the PMC is created when the game is first launched and a
-  side is chosen. So every wallet reads 0, there is no stash container to credit
-  into, and **the buy-in cannot be exercised without launching the game once.** That
-  is the actual blocker on smoking the money, not the profile.
+  The launcher writes a **384-byte stub** -- `characters.pmc` is `savage`,
+  `Encyclopedia`, `Hideout`, `WishList` and nothing else, because the PMC is built
+  when the game is first launched and a side is chosen. So every wallet reads 0,
+  there is no stash container to credit into, and **the buy-in cannot be exercised
+  without launching the game once.** That is the actual blocker on smoking the money.
 
   Worth noting what it *did* prove: `Bank`'s stack walk ran against a profile with
   essentially no inventory and returned zero rather than throwing, which is the
   "state routes are called before anything exists" hazard passing on the money path.
+
+- **Creating the character over the wire was tried and abandoned. Do not retry it
+  blind.** `/client/game/profile/create` takes
+  `ProfileCreateRequestData { Side, Nickname, HeadId, VoiceId }`, and calling it
+  directly threw `NullReferenceException` inside
+  `CreateProfileService.CreateProfile` twice, leaving the in-memory profile
+  unreadable until a restart. What was learned, so an hour is not spent again:
+
+  - **The route answers `200` with an empty body when it has thrown.** Nothing in the
+    reply says it failed -- the exception is only in the server console. Any script
+    driving it must verify by reading the profile back, never by checking the
+    response.
+  - **The on-disk profile is not touched by the failure.** SPT holds profiles in
+    memory and flushes on save, so a restart restores the stub. The damage is
+    recoverable, which is the one good thing about it.
+  - The likely cause is **request binding**, not the profile: the properties bind
+    case-sensitively and PascalCase was sent without ever confirming the
+    `JsonPropertyName` the model actually declares. `Nickname.ToLowerInvariant()`
+    early in the service is an unguarded dereference, so a nickname that failed to
+    bind throws exactly this. **Read the attributes off
+    `ProfileCreateRequestData` before sending anything.**
+  - Seeding `characters.pmc` with `Info` / `Achievements` / `Prestige` did **not**
+    fix it, so the "existing PMC is carried forward" theory is wrong or incomplete.
+
+  Launching the game once is cheaper than finishing this, unless a machine turns up
+  where that is impossible.
 - **Give each wallet a chips-per-unit rate.** One chip to one unit means only roubles
   can buy into a 2,000,000 chip table, so **dollars and euros are stakeable in the
   enum and refused in practice** -- their ceilings are 5,000 against a 2,000,000 chip
