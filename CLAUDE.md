@@ -112,8 +112,8 @@ means the gate, not a bug in the game code.
 Still to come, mirroring Blackjack: `tests/Poker.Server.Tests`.
 
 The engine knows nothing about currency -- it takes an `int` and returns an `int`.
-Everything that maps a `Wallet` to an item template belongs in `Wallets.cs` and
-`Bank.cs` when they are ported. Keep it that way; it is what makes the rules
+Everything that maps a `Wallet` to an item template lives in `Wallets.cs` and
+`Bank.cs`, both of which are ported. Keep it that way; it is what makes the rules
 testable.
 
 ## What Blackjack gives this mod
@@ -235,7 +235,15 @@ what it did, and shouts when those disagree.
   round" below.
 - `IPokerAgent` -- where a bot's decision comes from, **one instance per seat**. Its
   `PokerContext` carries that seat's own cards, the board, the stacks, the pot and
-  what is legal -- never another seat's cards and never the deck.
+  what is legal -- never another seat's cards and never the deck. `HandEnded` is how
+  a seat learns what the hand cost it, and is the only route anything carries from
+  one hand to the next.
+- `HoldemView` -- the only thing a transport ever sends, and the single place the
+  hidden-card rule is applied. `Of` reveals a seat's cards to that seat and
+  otherwise only once `HoldemSeat.Hand` is filled in, which the engine does for
+  seats that reached a showdown. See "It found something on the first hand it drew".
+- `INameSource` -- the engine takes names rather than inventing them, and numbers
+  any seat it is not given one for. See "Naming the bots".
 - The whole Ultimate Texas Hold'em game -- **parked, not on the path**. See "Parked:
   the Ultimate Texas Hold'em build".
 
@@ -730,8 +738,9 @@ means backs. `HoldemView.Of` keys it off the seat having reached a showdown.
 
 `BotTable` is injectable and `Types["usec"].FirstNames` is the game's own PMC
 nickname list -- 619 of them, the names a player meets in raids. `BotNames` reads
-it once, filters to ASCII names of 16 characters or fewer, and hands distinct ones
-to each table.
+**both `usec` and `bear`**, which carry the same list, so a change to either on some
+future build cannot leave the table nameless. It reads once, filters to ASCII names
+of 16 characters or fewer, and hands distinct ones to each table.
 
 The filter is not fussiness: the panel borrows whatever font the menu happens to
 have loaded, and a name that renders as boxes is worse than a numbered seat. The
@@ -1023,10 +1032,15 @@ resolved and the profile can be read.
 
 ## Releasing
 
-Mirror Blackjack: `releases/Poker-<ver>.zip`, laid out as `user/mods/Poker/` so it
-extracts into an SPT install. The version lives in **two** places and they must
-agree: the server csproj `<Version>` and `ModMetadata.Version`. SPT's own assemblies
-are not bundled -- the server provides them.
+Mirror Blackjack: `releases/Poker-<ver>-SPT4.1.zip`, laid out as
+**`SPT_Runtime/user/mods/Poker/`** and extracted at the root of the install. Not
+`user/mods/Poker/` -- that is the same mistake the note about the runtime folder
+warns against, and it produces a mod nothing ever loads.
+
+The version lives in **two** places and they must agree: the server csproj
+`<Version>` and `ModMetadata.Version`. `pack-mod.ps1` reads the version back out of
+`ModMetadata.cs` so the zip name cannot drift from it. SPT's own assemblies are not
+bundled -- the server provides them.
 
 **The mod GUID is `com.mybutthasarash.poker`**, and **both halves declare it
 unchanged** -- `ModMetadata.ModGuid` on the server and `[BepInPlugin]` on the client
@@ -1045,7 +1059,7 @@ claiming the server did not exist, four commits after it shipped -- a fresh sess
 reads this first and would have started building one.
 
 - Working branch **`uth`** (named before the variant changed), off `main`.
-- `Poker.Game` green at **189 tests** in about 7 seconds, mutation-checked
+- `Poker.Game` green at **189 tests** in about 8 seconds, mutation-checked
   throughout. Every test builds its own `HoldemRules`, so the stakes can be retuned
   without touching the suite.
 - **The variant is no-limit Texas Hold'em against bots**, decided after two
@@ -1083,8 +1097,11 @@ reads this first and would have started building one.
   session can return is roughly `buy-in x seats`; bitcoin and Lega medals, which do
   not stack, are the binding constraint -- and all three valuable wallets are at
   zero on the test profile, so none can be exercised by betting yet.
-- Port `Bank`, `ProfileGateway`, `EscrowStore`, `StatsStore` and `Fakes` from
-  Blackjack largely as-is; they are currency plumbing and carry no blackjack rules.
+- Port `EscrowStore`, `StatsStore` and `Fakes` from Blackjack; they are currency
+  plumbing and carry no blackjack rules. `Bank` and `ProfileGateway` are already
+  here but **half-ported on purpose** -- `Bank` reads balances and stack limits and
+  has neither `TryDebit` nor `Credit`, and `ProfileGateway` has `HasProfile` without
+  `SaveAsync`. That is what makes this build unable to move money.
 - Port `MoneyInvariantTests` **before** writing settlement, not after.
 - Port `ProfileSync` and add the item-event transport with it, or money will move
   in the profile while the stash on screen stays stale.
@@ -1100,13 +1117,17 @@ reads this first and would have started building one.
 
 **The game**
 
-- **Give the bots a life the player can see.** Mood and memory are in, and so are
-  names and one agent per seat. Still missing: notional stacks that can bust and be
-  replaced, engine-emitted reactions, and thinking time taken from how close the
-  decision was. See "They have to feel like real people".
-- **Decide the re-seating policy for the mod.** `HoldemTable.Reseat` exists and the
-  console tops everybody up, but a cash game, a tournament and "a stranger sits
-  down" are three different answers and only the engine mechanism is built.
+- **Give the bots a life the player can see.** Mood and memory are in, so are names
+  and one agent per seat, and a busted bot is already replaced by a new character --
+  `PokerService.Reseat` improvises somebody and swaps the agent, so the table turns
+  over on its own. Still missing: **engine-emitted reactions**, and **thinking time
+  taken from how close the decision was**. See "They have to feel like real people".
+- **Decide the re-seating policy deliberately.** Three places now buy seats back in
+  and they do not agree: the console tops everybody up, `PokerService` replaces a
+  busted bot with a stranger and tops the player up for free, and `HoldemTable`
+  itself only supplies the mechanism. A cash game, a tournament and "a stranger sits
+  down" are three different answers, and the money path will force a choice --
+  topping the player up stops being free the moment the chips are real.
 - Decide UTH's fate -- delete, ship as a second table, or leave parked. Undecided
   on purpose; it costs nothing where it is.
 
