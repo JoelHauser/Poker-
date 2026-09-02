@@ -721,22 +721,26 @@ namespace Poker.Client
         /// switched off, which is what stops the text reverting to HIDEOUT the next time
         /// the bar is shown or the language is changed.
         ///
-        /// **Three separate things made the tab the wrong size, and each is undone here.**
-        /// They are worth naming because Blackjack's tab has all three and shows them:
-        /// two mod tabs side by side, both visibly wider than the game's own.
+        /// **None of this is why the tab came out too wide** -- that was the icon, and it
+        /// is fixed in <see cref="MenuIcon"/>. Worth stating plainly, because a tab that
+        /// is twice the width of its neighbours looks like a text-fitting fault and this
+        /// is the method anybody would come to first. `Measured()` settled it: the
+        /// template's label was 16pt at 64.6 wide and ours was 16pt at 48.3, while the
+        /// icon went from 25 to 160. The label was never involved.
         ///
-        /// - **TMP auto-sizing rescales the letters rather than the box.** The label
-        ///   arrives set up to fill the rect HIDEOUT needed, and given a shorter word it
-        ///   grows the type until it fits again -- so POKER came out in larger letters
-        ///   than every other tab on the bar. The template's own font size is copied and
-        ///   auto-sizing switched off, which is the only way the two can match.
-        /// - **The size was only ever allowed to grow.** A shorter name left the tab at
-        ///   the width of the tab it was copied from. Both directions now.
-        /// - **The chrome was counted twice.** The old arithmetic measured the padding
-        ///   from the whole tab and then added it to a hint that already sat inside that
-        ///   padding, which pushed the label away from the icon. Measured on the template
-        ///   -- its tab width less its own label width -- so it means the same thing on
-        ///   both sides of the comparison.
+        /// What is left here is defence, and each line is still worth having:
+        ///
+        /// - **TMP auto-sizing rescales the letters rather than the box.** This bar's
+        ///   labels do not use it, but a label that did would fill the rect its old name
+        ///   needed by growing the type -- so the template's size is copied and
+        ///   auto-sizing switched off rather than trusted to stay off.
+        /// - **The size is set in both directions.** The old code only ever widened, so a
+        ///   short name kept the width of the tab it was copied from. It never fired here
+        ///   -- this bar sizes its tabs from their contents and the hint is unset -- but
+        ///   it would on a bar that did not.
+        /// - **The chrome is measured on the template**, its tab width less its own label
+        ///   width, rather than on the clone where the padding gets counted twice: once
+        ///   in the measurement and again by the hint that already sits inside it.
         /// </summary>
         private static void Relabel(GameObject clone, Transform template, string text)
         {

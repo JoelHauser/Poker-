@@ -821,33 +821,48 @@ borrowed icon's tint bleeding through. It is `MenuIcon.Draw` from both entry poi
 now. This is the same failure as the `MenuScreen.Awake` one: a file copied from
 Blackjack, kept in one place and not the other.
 
-### A cloned tab does not automatically look like the tabs beside it
+### The pip is 160 units wide, and that one number broke both entrances
 
-Three faults, each of which made POKER the wrong size on the bar, and **Blackjack has
-all three** -- which is why both mod tabs are visibly wider than the game's own.
+**An `Image` reports its sprite's native size as its layout-preferred size, and a
+layout group believes it.** `Textures.Suit` draws 160 pixels square, and the canvas is
+at 100 reference pixels per unit, so the pip asks for **160 units where the hideout's
+own icon asked for 25**. Everything below is that, wearing two disguises:
 
-- **TMP auto-sizing rescales the letters, not the box.** The borrowed label is set up
-  to fill the rect HIDEOUT needed; give it a shorter word and it grows the type until
-  it fits again. POKER came out in larger letters than every other tab. Copy the
-  template's `fontSize` and switch `enableAutoSizing` off -- there is no other way for
-  the two to match.
-- **The size was only ever allowed to grow.** The old code widened a tab whose name no
-  longer fitted and did nothing when it fitted with room to spare, so a short name kept
-  the width of whatever it was cloned from. Both directions.
-- **The chrome was counted twice.** Padding measured from the whole tab, then added to
-  a hint that already sat inside that padding. Measure it on the template -- its tab
-  width less its own label width -- so the number means the same thing on both sides.
+- **The task-bar tab came out 230 wide against the game's 112.** It reads as a font or
+  a padding fault, and a whole round of fixes was aimed at both before anything was
+  measured.
+- **The menu button's icon blew up on hover**, when whatever the hover state dirties
+  finally let the Image have the width it had been asking for all along. A spade
+  magnified sixfold and cropped to its middle shows its two lobes and nothing else,
+  which is why it looked like the icon had been pulled apart into two of something.
 
-And one that is not about size: **an `Animator` is a `Behaviour`, not a
+`MenuIcon.Pin` holds the icon to the footprint of the one it replaced -- read off the
+rect *before* the swap -- with a `LayoutElement` for the parent that measures and
+`SetSizeWithCurrentAnchors` for the one that does not. Not `sizeDelta`: on a rect that
+stretches with its parent that is not a size at all, and an icon anchored that way
+comes out inflated by the padding rather than pinned.
+
+**The label was innocent the whole time, and the tab is the reason to distrust a
+plausible story.** POKER at 230 against HIDEOUT at 112 pointed straight at text
+fitting, and three real faults were duly found in `Relabel` -- auto-sizing, growth in
+one direction only, chrome counted twice. All three are worth fixing and **none of them
+was happening**: the template's label measured 16pt at 64.6 wide and ours 16pt at 48.3,
+so our label was the *narrower* of the two. They are kept as defence and the comment on
+`Relabel` now says so out loud.
+
+**`Measured()` is what ended it**, and it is worth keeping for the next one. It logs
+the template's geometry and the clone's side by side, once, a frame after the tab is
+built -- every child's width, its `LayoutElement`, and each label's size and
+auto-sizing. A layout fault is the one class of bug a compiler, a test and a screenshot
+are all bad at: the screenshot says it is wrong and nothing says by how much or which
+box is carrying the extra. One line of log said `Icon w=25` against `Icon w=160` and
+there was nothing left to argue about.
+
+Separately, and not about size: **an `Animator` is a `Behaviour`, not a
 `MonoBehaviour`.** `Neuter` sweeps `GetComponentsInChildren<MonoBehaviour>` and so
 never saw the one the tab clones, which then went on animating a tab whose toggle no
 longer drove it. Frozen instead -- `Instantiate` copied the template's current values
 and the template is picked unselected, so freezing keeps exactly the resting look.
-
-`Measured()` logs the template's geometry and ours side by side, once, a frame after
-the tab is built. A layout fault is the one class of bug a compiler, a test and a
-screenshot are all bad at: the screenshot says it is wrong and nothing says by how much
-or which box is carrying the extra.
 
 ### Naming the bots
 
@@ -1368,12 +1383,13 @@ reads this first and would have started building one.
 - **POKER is on the menu task bar**, so the table opens from anywhere out of raid and
   not only from the main menu. Both of Blackjack's inter-mod rules are obeyed, and the
   two tabs do sit beside each other -- **seen on a screen at the home box**, which is
-  also where the tab came out the wrong size. See "A cloned tab does not automatically
-  look like the tabs beside it".
+  also where the tab came out twice the width of the game's own. See "The pip is 160
+  units wide".
 - **The main-menu button and the tab have been looked at**, and three things were
-  wrong with how they were drawn rather than with whether they worked: the tab was
-  sized and typeset from the tab it was cloned from, the menu row had a hole in it
-  left by Blackjack leapfrogging past our first placement, and the menu pip was a
+  wrong with how they were drawn rather than with whether they worked: the pip was
+  sized from its own sprite rather than from the icon it replaced, which is what made
+  the tab too wide and the menu icon blow up on hover; the menu row had a hole in it
+  left by Blackjack leapfrogging past our first placement; and the menu pip was a
   diamond from a stale copy of `MenuIcon` that could not be told from Blackjack's.
   All three are fixed and deployed and **none of the fixes has been seen**.
 - **Both halves are installed at `C:\HUH`, the server loads them, and `-PingOnly`
@@ -1389,18 +1405,22 @@ reads this first and would have started building one.
 
 **Both entrances have now been seen on a screen**, on the home box: the POKER button
 sits under EXIT on the main menu and the POKER tab sits beside MAIN MENU and HIDEOUT
-on the task bar, with Blackjack's alongside. That screenshot is what turned up the
-three tab-sizing faults and the menu-row hole above; the fixes for them are compiled
-and deployed and **have not themselves been seen**.
+on the task bar, with Blackjack's alongside. Two rounds of fixes have come out of
+looking at them, and the second round is the one that mattered -- see "The pip is 160
+units wide". Everything from both is compiled and deployed and **has not itself been
+seen**.
 
 In rough order of how likely it is to be wrong:
 
 1. **The tab is the size of the tabs beside it.** POKER should be narrower than
-   HIDEOUT and set in the same type. `[Poker] tab, as laid out --` in the log gives
-   the template's widths and ours side by side if it is not.
-2. **EXIT, POKER and BLACKJACK are evenly spaced** on the main menu, with no gap where
+   HIDEOUT. `[Poker] tab, as laid out --` in the log gives the template's widths and
+   ours side by side if it is not; the number that matters is `Icon w=`, which should
+   now read 25 on both lines rather than 25 against 160.
+2. **The menu pip stays one pip on hover.** It was being magnified to its sprite's
+   native size the moment the hover state dirtied the layout, which showed as the icon
+   pulling apart into two.
+3. **EXIT, POKER and BLACKJACK are evenly spaced** on the main menu, with no gap where
    Blackjack used to be.
-3. **The menu pip is a spade**, and the same weight as Blackjack's diamond beside it.
 4. **The pot column, the close fade and the buy-in confirmation**, all unseen.
 5. **Then, and only then, the money.** `-PingOnly` first, then one buy-in on the test
    profile with the console open. Every `InventoryHelper` call in `Bank` is still code
