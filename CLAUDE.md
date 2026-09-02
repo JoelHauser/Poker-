@@ -734,6 +734,17 @@ means backs. `HoldemView.Of` keys it off the seat having reached a showdown.
   excluded from its own measurement and the lowest row stays the exit group forever.
   Poker now measures once per menu and remembers. **Blackjack still has this bug**
   and will still creep, though it settles now that we hold still.
+- **Holding still was not enough: it left a hole.** Remembering our first answer
+  stopped *us* walking down the screen, but that first answer had already been
+  measured against Blackjack's button -- so POKER landed a row under BLACKJACK, and
+  when Blackjack then leapfrogged below us the row it vacated stayed empty. On screen
+  that is a double gap between EXIT and POKER, and it looks like our spacing
+  arithmetic rather than like another mod moving. **Measure only the buttons the menu
+  declares as its own** -- `MenuScreen` has `_playButton`, `_playerButton`,
+  `_tradeButton`, `_hideoutButton`, `_exitButton` and two contextual ones, exactly
+  the way `MenuTaskBar` has `_toggleButtons`. We then take the row directly under
+  EXIT and hold it, and anything else that measures the lowest button settles under
+  us. No negotiation, no hole, and it works whatever else is installed.
 - **Read `BepInEx\LogOutput.log` before guessing.** Two "menu button added" lines
   is how the leapfrog was found. `[Poker] client loaded` confirms the plugin
   started; its absence points at the validator.
@@ -792,7 +803,7 @@ Two things added here on top of the port:
 
 - **A spade, not Blackjack's diamond.** The two tabs sit side by side with the same
   label size in the same colour, so the pip is the only thing telling them apart at a
-  glance. `MenuIcon.Spade` normalises rotation and scale on the borrowed icon, because
+  glance. `MenuIcon.Draw` normalises rotation and scale on the borrowed icon, because
   a spade that inherits a mirrored transform comes out looking like a trophy -- which
   is the reason Blackjack picked the one suit with no up or down.
 - **`IsAnotherModsTab()`** guards the degraded fallback path, so we cannot clone the
@@ -801,6 +812,42 @@ Two things added here on top of the port:
 The tab and the main-menu button are independent on purpose: the button is a Harmony
 patch inside a `try`, so a patch that will not apply on some future build costs the
 button and leaves the tab, which is the better of the two anyway.
+
+**The suit is chosen in `MenuIcon` and nowhere else, and that used to be two places.**
+`MenuButtonPatch` carried its own pasted copy of the icon routine, drawing a *diamond*
+and missing the `icon.color = Color.white` the shared one sets -- so the menu entry was
+both indistinguishable from Blackjack's at a glance and visibly weaker than it, the
+borrowed icon's tint bleeding through. It is `MenuIcon.Draw` from both entry points
+now. This is the same failure as the `MenuScreen.Awake` one: a file copied from
+Blackjack, kept in one place and not the other.
+
+### A cloned tab does not automatically look like the tabs beside it
+
+Three faults, each of which made POKER the wrong size on the bar, and **Blackjack has
+all three** -- which is why both mod tabs are visibly wider than the game's own.
+
+- **TMP auto-sizing rescales the letters, not the box.** The borrowed label is set up
+  to fill the rect HIDEOUT needed; give it a shorter word and it grows the type until
+  it fits again. POKER came out in larger letters than every other tab. Copy the
+  template's `fontSize` and switch `enableAutoSizing` off -- there is no other way for
+  the two to match.
+- **The size was only ever allowed to grow.** The old code widened a tab whose name no
+  longer fitted and did nothing when it fitted with room to spare, so a short name kept
+  the width of whatever it was cloned from. Both directions.
+- **The chrome was counted twice.** Padding measured from the whole tab, then added to
+  a hint that already sat inside that padding. Measure it on the template -- its tab
+  width less its own label width -- so the number means the same thing on both sides.
+
+And one that is not about size: **an `Animator` is a `Behaviour`, not a
+`MonoBehaviour`.** `Neuter` sweeps `GetComponentsInChildren<MonoBehaviour>` and so
+never saw the one the tab clones, which then went on animating a tab whose toggle no
+longer drove it. Frozen instead -- `Instantiate` copied the template's current values
+and the template is picked unselected, so freezing keeps exactly the resting look.
+
+`Measured()` logs the template's geometry and ours side by side, once, a frame after
+the tab is built. A layout fault is the one class of bug a compiler, a test and a
+screenshot are all bad at: the screenshot says it is wrong and nothing says by how much
+or which box is carrying the extra.
 
 ### Naming the bots
 
@@ -1319,9 +1366,16 @@ reads this first and would have started building one.
   build found a real bug that had been sitting in `MenuButtonPatch` since the port.
   See "The client had never been compiled".
 - **POKER is on the menu task bar**, so the table opens from anywhere out of raid and
-  not only from the main menu. Both of Blackjack's inter-mod rules are obeyed, so the
-  two tabs can sit beside each other. **Not yet seen on a screen** -- see "The task-bar
-  tab".
+  not only from the main menu. Both of Blackjack's inter-mod rules are obeyed, and the
+  two tabs do sit beside each other -- **seen on a screen at the home box**, which is
+  also where the tab came out the wrong size. See "A cloned tab does not automatically
+  look like the tabs beside it".
+- **The main-menu button and the tab have been looked at**, and three things were
+  wrong with how they were drawn rather than with whether they worked: the tab was
+  sized and typeset from the tab it was cloned from, the menu row had a hole in it
+  left by Blackjack leapfrogging past our first placement, and the menu pip was a
+  diamond from a stale copy of `MenuIcon` that could not be told from Blackjack's.
+  All three are fixed and deployed and **none of the fixes has been seen**.
 - **Both halves are installed at `C:\HUH`, the server loads them, and `-PingOnly`
   passes.** Version gate, six routes, banner, session resolved, profile found, all six
   wallets read, no errors. That is the whole of what a headless server can confirm:
@@ -1333,18 +1387,20 @@ reads this first and would have started building one.
 
 ### What to check first at the home box
 
-Everything below has been compiled and installed and **none of it has been seen**.
+**Both entrances have now been seen on a screen**, on the home box: the POKER button
+sits under EXIT on the main menu and the POKER tab sits beside MAIN MENU and HIDEOUT
+on the task bar, with Blackjack's alongside. That screenshot is what turned up the
+three tab-sizing faults and the menu-row hole above; the fixes for them are compiled
+and deployed and **have not themselves been seen**.
+
 In rough order of how likely it is to be wrong:
 
-1. **The task-bar tab lands in the right group** -- beside MAIN MENU and HIDEOUT, not
-   beside SETTINGS. With Blackjack installed the two should sit next to each other,
-   one spade and one diamond. If ours lands in the wrong half, the spacer's
-   `flexibleWidth` is what `Divider()` looks for.
-2. **`[Poker] client loaded` in `BepInEx\LogOutput.log`.** Its absence points at the
-   `PluginValidator`, not at the code. The shipped plugin was built against EFT
-   `0.16.9.5.40743` on SPT 4.1.3.
-3. **The main-menu button appears.** It has never worked on this EFT build -- the
-   patch did not compile until now -- so this is the first time it can have.
+1. **The tab is the size of the tabs beside it.** POKER should be narrower than
+   HIDEOUT and set in the same type. `[Poker] tab, as laid out --` in the log gives
+   the template's widths and ours side by side if it is not.
+2. **EXIT, POKER and BLACKJACK are evenly spaced** on the main menu, with no gap where
+   Blackjack used to be.
+3. **The menu pip is a spade**, and the same weight as Blackjack's diamond beside it.
 4. **The pot column, the close fade and the buy-in confirmation**, all unseen.
 5. **Then, and only then, the money.** `-PingOnly` first, then one buy-in on the test
    profile with the console open. Every `InventoryHelper` call in `Bank` is still code

@@ -147,10 +147,10 @@ namespace Poker.Client
             }
 
             Relabel(button, "POKER");
-            ReplaceIcon(button);
+            MenuIcon.Draw(button);
             button.Interactable = true;
             Wire(button);
-            Follow(button, template);
+            Follow(button, template, screen);
 
             PokerClientPlugin.Log.LogInfo($"[Poker] menu button added, cloned from '{template.name}'");
         }
@@ -172,62 +172,6 @@ namespace Poker.Client
             if (label != null && size > 0f)
             {
                 label.fontSize = size;
-            }
-        }
-
-        /// <summary>
-        /// Swaps the borrowed icon for a diamond.
-        ///
-        /// A clone wears whatever icon it copied, so without this the BLACKJACK button
-        /// carries the hideout's. Blanking it is not the answer either: with a menu mod
-        /// installed the icon is the button's main visual and the others would all have
-        /// one, leaving ours conspicuously bare. A suit is drawn by the same code that
-        /// draws the cards, so it needs no art shipped and looks deliberate either way.
-        ///
-        /// The diamond specifically, because it is the only suit with no up or down. A
-        /// spade inheriting a mirrored or rotated transform from the icon it replaced
-        /// comes out looking like a trophy; a rhombus cannot.
-        ///
-        /// The container is left alone whatever happens, because its size is part of
-        /// the row's spacing.
-        /// </summary>
-        private static void ReplaceIcon(DefaultUIButton button)
-        {
-            var icons = button.GetComponentsInChildren<Image>(true)
-                .Where(i => i != null && i.name.IndexOf("icon", StringComparison.OrdinalIgnoreCase) >= 0)
-                .ToList();
-
-            if (icons.Count == 0)
-            {
-                return;
-            }
-
-            var pip = Textures.Suit('D', Color.white);
-
-            foreach (var icon in icons)
-            {
-                var rect = icon.rectTransform;
-
-                // Whatever the borrowed icon was, it may have been rotated or mirrored
-                // to suit its own artwork, and a spade inherits that and comes out
-                // upside down. Reported as well as reset, because a rotation here is
-                // worth knowing about rather than silently undoing.
-                if (rect.localRotation != Quaternion.identity ||
-                    rect.localScale.x < 0f || rect.localScale.y < 0f)
-                {
-                    PokerClientPlugin.Log.LogInfo(
-                        $"[Poker] icon '{icon.name}' had rotation {rect.localEulerAngles} " +
-                        $"scale {rect.localScale}; normalising.");
-                }
-
-                rect.localRotation = Quaternion.identity;
-                rect.localScale = new Vector3(
-                    Mathf.Abs(rect.localScale.x),
-                    Mathf.Abs(rect.localScale.y),
-                    Mathf.Abs(rect.localScale.z));
-
-                icon.sprite = pip;
-                icon.preserveAspect = true;
             }
         }
 
@@ -262,7 +206,7 @@ namespace Poker.Client
         /// size it currently has -- including any sideways offset a menu mod applied,
         /// since that is baked into the template by the time this runs.
         /// </summary>
-        private static void Follow(DefaultUIButton ours, DefaultUIButton template)
+        private static void Follow(DefaultUIButton ours, DefaultUIButton template, MenuScreen screen)
         {
             var mine = ours.GetComponent<RectTransform>();
             var theirs = template.GetComponent<RectTransform>();
@@ -287,7 +231,8 @@ namespace Poker.Client
             mine.sizeDelta = theirs.sizeDelta;
             mine.localScale = theirs.localScale;
 
-            // One row below the lowest button, measured in world space.
+            // One row below the lowest of the *menu's own* buttons, measured in world
+            // space.
             //
             // Local positions cannot be compared here. The exit entry is a group with
             // the button nested inside it, so its anchoredPosition is relative to that
@@ -296,22 +241,24 @@ namespace Poker.Client
             // only ones that mean the same thing for every button.
             // Measured once per menu, then remembered.
             //
-            // WorldRows excludes our own button but not another mod's, and we sit one
-            // row under the lowest of them. Install runs again on every Awake and every
-            // Show, so with a second mod doing the same thing the two leapfrog: we
-            // measure against where they are now and drop below it, they measure
-            // against where we just went and drop below that, and the pair walks off
-            // the bottom of the menu a row per cycle. With only one such mod installed
-            // it never showed, because a mod's own button is excluded from its own
-            // measurement, so the lowest row stayed the exit group forever.
+            // **Only the game's own buttons are measured**, and that is what leaves the
+            // column evenly spaced. Measuring every button meant measuring the other
+            // mod's too: Install runs again on every Awake and every Show, so with a
+            // second mod doing the same thing the two leapfrog -- we drop below where
+            // they are now, they drop below where we just went. Remembering our first
+            // answer stopped us walking down the screen but not the damage: we had
+            // already landed a row under Blackjack, and when Blackjack then moved below
+            // us it left the row it had been on empty. That hole is the double gap
+            // between EXIT and POKER.
             //
-            // Remembering the first answer breaks the loop from our side: wherever we
-            // land is where we stay, so nobody else's placement moves on our account.
+            // Taking the row directly under EXIT and holding it costs nothing and fixes
+            // it from our side alone: a mod that measures the lowest button now finds
+            // ours and settles one row under it, which is where it belongs.
             var container = theirs.parent;
 
             if (!_hasPlacement || !ReferenceEquals(_placedUnder, container))
             {
-                var rows = WorldRows(template, ours);
+                var rows = WorldRows(screen, ours);
                 if (rows.Count == 0)
                 {
                     mine.anchoredPosition = theirs.anchoredPosition;
@@ -339,22 +286,22 @@ namespace Poker.Client
         private static bool _hasPlacement;
 
         /// <summary>
-        /// The world Y of every visible menu button, ours excluded, highest first.
+        /// The world Y of every visible button the menu owns, highest first.
+        ///
+        /// Read from <see cref="MenuScreen"/>'s own fields rather than by walking the
+        /// children, for the same reason the task-bar tab reads `_toggleButtons`: those
+        /// fields hold the game's buttons and nothing else, so no other mod's button can
+        /// be mistaken for a row of the menu. Walking the children is what put us a row
+        /// under Blackjack and left a hole behind when Blackjack moved on.
         ///
         /// Rows closer together than a few pixels are treated as one, since a button
         /// and a label of its own can sit at almost the same height without being two
         /// entries.
         /// </summary>
-        private static List<float> WorldRows(DefaultUIButton template, DefaultUIButton ours)
+        private static List<float> WorldRows(MenuScreen screen, DefaultUIButton ours)
         {
-            var parent = template.transform.parent;
-            if (parent == null)
-            {
-                return new List<float>();
-            }
-
-            var ys = parent.GetComponentsInChildren<DefaultUIButton>(true)
-                .Where(b => b != null && b.name != ButtonName && b != ours && b.gameObject.activeInHierarchy)
+            var ys = Owned(screen)
+                .Where(b => b != null && b != ours && b.name != ButtonName && b.gameObject.activeInHierarchy)
                 .Select(b => b.GetComponent<RectTransform>())
                 .Where(r => r != null)
                 .Select(r => r.position.y)
@@ -401,6 +348,53 @@ namespace Poker.Client
             template.GetWorldCorners(corners);
             var height = Mathf.Abs(corners[1].y - corners[0].y);
             return height > 1f ? height : 46f;
+        }
+
+        /// <summary>
+        /// The buttons the menu declares as its own: `_playButton`, `_playerButton`,
+        /// `_tradeButton`, `_hideoutButton`, `_exitButton` and the two contextual ones,
+        /// read off <see cref="MenuScreen"/> by type rather than by name so a build that
+        /// renames or adds one is followed for free.
+        ///
+        /// The fields are private, so they are allowed to vanish under us. Falling back
+        /// to the children costs the guarantee and nothing else -- it is what this did
+        /// before -- so a degraded read still places a button, just one that another mod
+        /// can push around.
+        /// </summary>
+        private static List<DefaultUIButton> Owned(MenuScreen screen)
+        {
+            var found = new List<DefaultUIButton>();
+
+            foreach (var field in typeof(MenuScreen)
+                         .GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                if (!typeof(DefaultUIButton).IsAssignableFrom(field.FieldType))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    if (field.GetValue(screen) is DefaultUIButton button && button != null)
+                    {
+                        found.Add(button);
+                    }
+                }
+                catch (Exception)
+                {
+                    // A field that cannot be read is a row we cannot measure.
+                }
+            }
+
+            if (found.Count > 0)
+            {
+                return found;
+            }
+
+            PokerClientPlugin.Log.LogWarning(
+                "[Poker] MenuScreen declares no buttons we can read; measuring its children instead.");
+
+            return screen.GetComponentsInChildren<DefaultUIButton>(true).ToList();
         }
 
         private static DefaultUIButton FindOurs(MenuScreen screen) =>

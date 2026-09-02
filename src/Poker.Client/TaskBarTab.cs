@@ -312,9 +312,10 @@ namespace Poker.Client
 
             Neuter(clone);
             Silence(bar, from, clone.transform);
-            Relabel(clone, "POKER");
-            MenuIcon.Spade(clone.transform);
+            Relabel(clone, from, "POKER");
+            MenuIcon.Draw(clone.transform);
             Hover(clone);
+            Measured(from, clone.transform);
 
             var click = clone.AddComponent<PokerTabClick>();
             click.Mirror = template;
@@ -520,6 +521,22 @@ namespace Poker.Client
         {
             var stopped = new List<string>();
 
+            // An Animator is a Behaviour and not a MonoBehaviour, so the loop below never
+            // saw it and it went on running on a tab whose toggle no longer drives it.
+            // What it animates on this bar is the tab's own look -- and on a copy with
+            // nothing telling it which state to be in, it settles wherever its default
+            // state puts it rather than where an unselected tab sits. Frozen instead:
+            // Instantiate copied the template's current values, and the template is
+            // picked unselected, so freezing keeps exactly the resting look. The hover
+            // highlight below is what gives the tab its feedback back.
+            foreach (var animator in clone.GetComponentsInChildren<Animator>(true))
+            {
+                if (animator != null)
+                {
+                    animator.enabled = false;
+                }
+            }
+
             foreach (var component in clone.GetComponentsInChildren<MonoBehaviour>(true))
             {
                 if (component == null)
@@ -697,22 +714,47 @@ namespace Poker.Client
         }
 
         /// <summary>
-        /// Renames the tab, and widens it if the name no longer fits.
+        /// Renames the tab and sizes it to the name, so POKER takes a POKER-sized slot on
+        /// the bar rather than a HIDEOUT-sized one.
         ///
         /// The label is driven by a LocalizedText that <see cref="Neuter"/> has already
-        /// switched off, which is what stops the text reverting to HANDBOOK the next time
+        /// switched off, which is what stops the text reverting to HIDEOUT the next time
         /// the bar is shown or the language is changed.
         ///
-        /// POKER is shorter than most of what is up there, so the widening below rarely
-        /// fires -- it is kept because the arithmetic is the same either way and a tab
-        /// that silently truncates is worse than one that is briefly too wide.
+        /// **Three separate things made the tab the wrong size, and each is undone here.**
+        /// They are worth naming because Blackjack's tab has all three and shows them:
+        /// two mod tabs side by side, both visibly wider than the game's own.
+        ///
+        /// - **TMP auto-sizing rescales the letters rather than the box.** The label
+        ///   arrives set up to fill the rect HIDEOUT needed, and given a shorter word it
+        ///   grows the type until it fits again -- so POKER came out in larger letters
+        ///   than every other tab on the bar. The template's own font size is copied and
+        ///   auto-sizing switched off, which is the only way the two can match.
+        /// - **The size was only ever allowed to grow.** A shorter name left the tab at
+        ///   the width of the tab it was copied from. Both directions now.
+        /// - **The chrome was counted twice.** The old arithmetic measured the padding
+        ///   from the whole tab and then added it to a hint that already sat inside that
+        ///   padding, which pushed the label away from the icon. Measured on the template
+        ///   -- its tab width less its own label width -- so it means the same thing on
+        ///   both sides of the comparison.
         /// </summary>
-        private static void Relabel(GameObject clone, string text)
+        private static void Relabel(GameObject clone, Transform template, string text)
         {
             var label = clone.GetComponentInChildren<TextMeshProUGUI>(true);
             if (label == null)
             {
                 return;
+            }
+
+            var original = template.GetComponentInChildren<TextMeshProUGUI>(true);
+
+            // Read from the template before our own text is set, because auto-sizing
+            // rewrites fontSize as it fits and reading it afterwards reads whatever this
+            // label had just decided for POKER rather than what the bar is set in.
+            if (original != null && original.fontSize > 0f)
+            {
+                label.enableAutoSizing = false;
+                label.fontSize = original.fontSize;
             }
 
             label.text = text;
@@ -721,24 +763,28 @@ namespace Poker.Client
             var root = (RectTransform)clone.transform;
             var rect = label.rectTransform;
 
-            // The tab is wider than its label by whatever padding and icon sit around it,
-            // and that margin has to survive the widening.
-            var chrome = Mathf.Max(0f, root.rect.width - rect.rect.width);
+            // What the tab is wider than its label by: the icon, the gaps and the
+            // padding. Taken from the template, where both numbers describe a tab the
+            // bar has actually laid out.
+            var theirs = original != null ? original.rectTransform.rect.width : 0f;
+            var chrome = Mathf.Max(0f, ((RectTransform)template).rect.width - theirs);
             var needed = label.GetPreferredValues(text).x;
+            var wanted = needed + chrome;
 
             // On the button the label sits on, not on the tab: the wrapper's own
-            // LayoutElement, where there is one, belongs to the badges.
+            // LayoutElement, where there is one, belongs to the badges. Set in both
+            // directions -- a hint left at the old name's width is exactly the bug.
             var hint = label.GetComponentInParent<LayoutElement>();
             if (hint != null)
             {
-                if (hint.preferredWidth > 0f && hint.preferredWidth < needed + chrome)
+                if (hint.preferredWidth > 0f)
                 {
-                    hint.preferredWidth = needed + chrome;
+                    hint.preferredWidth = wanted;
                 }
 
-                if (hint.minWidth > 0f && hint.minWidth < needed + chrome)
+                if (hint.minWidth > 0f)
                 {
-                    hint.minWidth = needed + chrome;
+                    hint.minWidth = wanted;
                 }
             }
 
@@ -750,14 +796,93 @@ namespace Poker.Client
                 return;
             }
 
-            var extra = needed - rect.rect.width;
-            if (extra <= 1f)
+            rect.sizeDelta = new Vector2(rect.sizeDelta.x + (needed - rect.rect.width), rect.sizeDelta.y);
+            root.sizeDelta = new Vector2(root.sizeDelta.x + (wanted - root.rect.width), root.sizeDelta.y);
+        }
+
+        /// <summary>Whether the tab has already been measured into the log, once.</summary>
+        private static bool _measured;
+
+        /// <summary>
+        /// Writes the template's geometry and ours side by side, once.
+        ///
+        /// A tab that comes out the wrong width is a layout fault, and layout faults are
+        /// the one class of bug a compiler, a test and a screenshot are all bad at: the
+        /// screenshot says it is wrong and nothing says by how much or which box is
+        /// carrying the extra. This is the cheapest way to answer that from a log file,
+        /// and the widths are exactly what <see cref="Relabel"/> is reasoning about.
+        ///
+        /// Deferred a frame, because the row has not been laid out at the moment the tab
+        /// is built and every width would read as its template's.
+        /// </summary>
+        private static void Measured(Transform template, Transform clone)
+        {
+            if (_measured || PokerClientPlugin.Instance == null)
             {
                 return;
             }
 
-            rect.sizeDelta = new Vector2(rect.sizeDelta.x + extra, rect.sizeDelta.y);
-            root.sizeDelta = new Vector2(root.sizeDelta.x + extra, root.sizeDelta.y);
+            _measured = true;
+            PokerClientPlugin.Instance.StartCoroutine(Report(template, clone));
+        }
+
+        private static IEnumerator Report(Transform template, Transform clone)
+        {
+            yield return null;
+
+            try
+            {
+                PokerClientPlugin.Log.LogInfo("[Poker] tab, as laid out --");
+                PokerClientPlugin.Log.LogInfo("  template " + Sizes(template));
+                PokerClientPlugin.Log.LogInfo("  ours     " + Sizes(clone));
+            }
+            catch (Exception ex)
+            {
+                PokerClientPlugin.Log.LogWarning("[Poker] could not measure the tab: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// One line per object under <paramref name="root"/>: its width, whether it is on,
+        /// what its LayoutElement asks for, and what a label's type is set to.
+        /// </summary>
+        private static string Sizes(Transform root)
+        {
+            if (root == null)
+            {
+                return "(gone)";
+            }
+
+            var parts = new List<string>();
+
+            foreach (var child in root.GetComponentsInChildren<RectTransform>(true))
+            {
+                var part = $"{child.name} w={child.rect.width:0.#}";
+
+                if (!child.gameObject.activeSelf)
+                {
+                    part += " off";
+                }
+
+                var element = child.GetComponent<LayoutElement>();
+                if (element != null)
+                {
+                    part += $" [min {element.minWidth:0.#} pref {element.preferredWidth:0.#} " +
+                            $"flex {element.flexibleWidth:0.#}{(element.ignoreLayout ? " ignored" : string.Empty)}]";
+                }
+
+                var text = child.GetComponent<TextMeshProUGUI>();
+                if (text != null)
+                {
+                    part += $" '{text.text}' {text.fontSize:0.#}pt" +
+                            (text.enableAutoSizing ? " auto" : string.Empty) +
+                            $" {text.alignment}";
+                }
+
+                parts.Add(part);
+            }
+
+            return string.Join(" | ", parts.ToArray());
         }
 
         /// <summary>

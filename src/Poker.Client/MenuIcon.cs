@@ -22,7 +22,18 @@ namespace Poker.Client
     internal static class MenuIcon
     {
         /// <summary>
-        /// Swaps the borrowed icon for a spade.
+        /// The mod's suit, chosen in one place.
+        ///
+        /// It was chosen in two, and they disagreed: the tab drew a spade and the menu
+        /// button drew a diamond from a copy of this file that had been pasted into
+        /// MenuButtonPatch and then never kept up. The menu entry was therefore
+        /// indistinguishable from Blackjack's at a glance, which is the exact thing the
+        /// spade exists to prevent.
+        /// </summary>
+        private const char Pip = 'S';
+
+        /// <summary>
+        /// Swaps the borrowed icon for the mod's suit.
         ///
         /// A clone wears whatever icon it copied, so without this the POKER entry
         /// carries the hideout's or the handbook's. Blanking it is not the answer
@@ -34,7 +45,7 @@ namespace Poker.Client
         /// The container is left alone whatever happens, because its size is part of
         /// the row's spacing.
         /// </summary>
-        internal static void Spade(Component owner)
+        internal static void Draw(Component owner)
         {
             if (owner == null)
             {
@@ -62,7 +73,7 @@ namespace Poker.Client
                 return;
             }
 
-            var pip = Textures.Suit('S', Color.white);
+            var pip = Textures.Suit(Pip, Color.white);
 
             foreach (var icon in icons)
             {
