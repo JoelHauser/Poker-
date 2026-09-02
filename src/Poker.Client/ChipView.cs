@@ -173,12 +173,27 @@ namespace Poker.Client
             float size = 44f,
             int maxChips = 6)
         {
+            // A column: the chips, and the number underneath them. Side by side, a
+            // stack of overlapping discs and a five-figure number fight for the same
+            // horizontal space and the eye has to work out which belongs to which.
+            // Stacked, the number reads as a caption on the pile it describes.
             var go = new GameObject("Chips", typeof(RectTransform));
             go.transform.SetParent(parent, false);
 
-            var row = go.AddComponent<HorizontalLayoutGroup>();
+            var column = go.AddComponent<VerticalLayoutGroup>();
+            column.spacing = size * 0.12f;
+            column.childAlignment = TextAnchor.UpperCenter;
+            column.childForceExpandWidth = false;
+            column.childForceExpandHeight = false;
+            column.childControlWidth = false;
+            column.childControlHeight = false;
+
+            var stack = new GameObject("Stack", typeof(RectTransform));
+            stack.transform.SetParent(go.transform, false);
+
+            var row = stack.AddComponent<HorizontalLayoutGroup>();
             row.spacing = -size * 0.42f;
-            row.childAlignment = TextAnchor.MiddleLeft;
+            row.childAlignment = TextAnchor.MiddleCenter;
             row.childForceExpandWidth = false;
             row.childForceExpandHeight = false;
             row.childControlWidth = false;
@@ -201,7 +216,7 @@ namespace Poker.Client
                         "Chip_" + entry.Key.File,
                         typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
 
-                    chip.transform.SetParent(go.transform, false);
+                    chip.transform.SetParent(stack.transform, false);
                     ((RectTransform)chip.transform).sizeDelta = new Vector2(size, size);
 
                     var image = chip.GetComponent<Image>();
@@ -216,19 +231,13 @@ namespace Poker.Client
                 }
             }
 
-            // Overlapping chips need a gap before the number, which a negative
-            // spacing would otherwise eat into.
-            var spacer = new GameObject("Gap", typeof(RectTransform));
-            spacer.transform.SetParent(go.transform, false);
-            ((RectTransform)spacer.transform).sizeDelta = new Vector2(size * 0.55f, size);
-
             var label = new GameObject("Amount", typeof(RectTransform));
             label.transform.SetParent(go.transform, false);
 
             var text = label.AddComponent<TextMeshProUGUI>();
             text.text = amount.ToString("N0");
             text.fontSize = size * 0.52f;
-            text.alignment = TextAlignmentOptions.Left;
+            text.alignment = TextAlignmentOptions.Center;
             text.color = new Color(0.92f, 0.89f, 0.80f, 1f);
             text.raycastTarget = false;
 
@@ -237,10 +246,31 @@ namespace Poker.Client
                 text.font = font;
             }
 
-            ((RectTransform)label.transform).sizeDelta = new Vector2(size * 4.4f, size);
+            // Sizes are computed rather than left to a ContentSizeFitter. The parent
+            // is itself a layout group with childControl off, so it places these by
+            // their own rects -- a fitter that resolves a frame later would leave the
+            // pot jumping on the first draw.
+            var labelHeight = size * 0.66f;
+            var stackWidth = StackWidth(drawn, size);
+
+            ((RectTransform)stack.transform).sizeDelta = new Vector2(stackWidth, size);
+            ((RectTransform)label.transform).sizeDelta = new Vector2(Mathf.Max(stackWidth, size * 4.4f), labelHeight);
+
+            ((RectTransform)go.transform).sizeDelta = new Vector2(
+                Mathf.Max(stackWidth, size * 4.4f),
+                size + column.spacing + labelHeight);
 
             return go;
         }
+
+        /// <summary>
+        /// How wide a row of overlapping chips ends up.
+        ///
+        /// The negative spacing means each disc after the first only advances by the
+        /// part of it that shows, so the row is much narrower than the count suggests.
+        /// </summary>
+        private static float StackWidth(int chips, float size) =>
+            chips <= 0 ? 0f : size + ((chips - 1) * size * 0.58f);
 
         private static Sprite Sprite(Chip chip)
         {

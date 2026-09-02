@@ -857,6 +857,27 @@ event that does nothing at all, and is called after the buy-in and after the
 cash-out. `PokerActions.Sync` is the server half and the two names must stay in
 step.
 
+### The pot reads as a column, and the table fades
+
+Two client details worth not undoing.
+
+**The pot's total sits under its chips, not beside them.** Side by side, a stack of
+overlapping discs and a five-figure number compete for the same horizontal space and
+the eye has to work out which belongs to which. `ChipView.Build` is a vertical group
+with the chips in a row above the number, and the sizes are **computed rather than
+left to a `ContentSizeFitter`** -- the pot holder is itself a layout group with
+`childControl` off, so a fitter resolving a frame later leaves the pot jumping on its
+first draw.
+
+**Closing fades.** The backdrop is 0.93 opaque, so toggling the canvas takes the
+whole screen from table to menu in one frame, which reads as a jump cut. Leaving
+takes longer than arriving (0.22s against 0.14s) and both are eased with
+`SmoothStep`: a straight lerp on a backdrop this opaque is a cross-dissolve, and
+halfway through it you are looking at a half-there table over a half-there menu.
+
+Blackjack already had the linear version of this, which is worth knowing before
+assuming a missing fade is the cause of a rough transition there.
+
 ### The buy-in asks first
 
 `SIT DOWN` was written when sitting down was free. It now spends two million

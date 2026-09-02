@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using Newtonsoft.Json.Linq;
@@ -64,11 +65,17 @@ namespace Poker.Client
         // change under the player between pressing + and pressing raise.
         private static JObject _lastReply;
 
+        // The running fade, and whether it is on its way out. IsOpen has to read as
+        // closed the moment a close starts, or the menu button toggles it straight
+        // back open again mid-fade.
+        private static Coroutine _fade;
+        private static bool _closing;
+
         private static string TableImagePath => System.IO.Path.Combine(
             System.IO.Path.GetDirectoryName(PokerClientPlugin.Instance?.Info?.Location ?? ".") ?? ".",
             "table.png");
 
-        internal static bool IsOpen => _root != null && _root.activeSelf;
+        internal static bool IsOpen => _root != null && _root.activeSelf && !_closing;
 
         internal static void Toggle()
         {
@@ -95,7 +102,9 @@ namespace Poker.Client
                     return;
                 }
 
+                _closing = false;
                 _root.SetActive(true);
+                FadeTo(1f, null);
 
                 // A canvas built this frame has not had a layout pass yet, so its
                 // controls have no real size or position until one happens.
@@ -123,9 +132,94 @@ namespace Poker.Client
 
         internal static void Close()
         {
-            if (_root != null)
+            if (_root == null || !_root.activeSelf || _closing)
+            {
+                return;
+            }
+
+            _closing = true;
+
+            FadeTo(0f, () =>
             {
                 _root.SetActive(false);
+                _closing = false;
+            });
+        }
+
+        /// <summary>
+        /// Fades the whole canvas, backdrop included.
+        ///
+        /// Short on purpose. This is not an animation anybody should notice; it exists
+        /// so the eye is handed back to the menu instead of having the menu appear
+        /// where a table was.
+        ///
+        /// Falls back to snapping if there is no coroutine host -- outside the menu
+        /// there is nothing to run it on, and a panel that will not close is worse than
+        /// one that closes abruptly.
+        /// </summary>
+        private static void FadeTo(float target, Action done)
+        {
+            var group = _root == null ? null : _root.GetComponent<CanvasGroup>();
+            var host = PokerClientPlugin.Instance;
+
+            if (group == null || host == null)
+            {
+                if (group != null)
+                {
+                    group.alpha = target;
+                }
+
+                if (done != null)
+                {
+                    done();
+                }
+
+                return;
+            }
+
+            if (_fade != null)
+            {
+                host.StopCoroutine(_fade);
+            }
+
+            _fade = host.StartCoroutine(Fade(group, target, done));
+        }
+
+        private static IEnumerator Fade(CanvasGroup group, float target, Action done)
+        {
+            // Leaving takes longer than arriving, and both are eased rather than
+            // linear.
+            //
+            // A straight lerp on a backdrop this opaque is a cross-dissolve: halfway
+            // through you are looking at a half-there table over a half-there menu,
+            // which reads as muddy rather than as leaving. Easing puts most of the
+            // movement at the start, so the table is gone early and the menu resolves
+            // on its own.
+            var duration = target > 0f ? 0.14f : 0.22f;
+
+            var start = group.alpha;
+            var elapsed = 0f;
+
+            // Clicks stop landing the moment a close begins, so a button pressed
+            // during the fade cannot fire at a table that is on its way out.
+            group.blocksRaycasts = target > 0f;
+            group.interactable = target > 0f;
+
+            while (elapsed < duration)
+            {
+                // Unscaled: the menu is not necessarily running at a normal timescale,
+                // and a fade that stalls with it would hang the panel open.
+                elapsed += Time.unscaledDeltaTime;
+                group.alpha = Mathf.SmoothStep(start, target, Mathf.Clamp01(elapsed / duration));
+                yield return null;
+            }
+
+            group.alpha = target;
+            _fade = null;
+
+            if (done != null)
+            {
+                done();
             }
         }
 
@@ -766,6 +860,12 @@ namespace Poker.Client
 
             _root = canvasObject;
 
+            // Faded rather than switched. The backdrop is nearly opaque, so toggling
+            // the canvas takes the whole screen from menu to table and back in a
+            // single frame -- which is what makes leaving feel like a jump cut.
+            var group = canvasObject.AddComponent<CanvasGroup>();
+            group.alpha = 0f;
+
             // The backdrop is what swallows clicks meant for the menu underneath. It
             // needs a Graphic to be raycast at all, hence a nearly-opaque image rather
             // than an empty transform. Darker than it was: the menu showing through
@@ -846,8 +946,10 @@ namespace Poker.Client
             _potHolder = NewBox("Pot", felt, Color.clear);
             _potHolder.anchorMin = _potHolder.anchorMax = new Vector2(0.5f, 0.5f);
             _potHolder.pivot = new Vector2(0.5f, 0.5f);
-            _potHolder.sizeDelta = new Vector2(460f, 46f);
-            _potHolder.anchoredPosition = new Vector2(0f, -74f);
+            // Tall enough for the chips and the number beneath them, and dropped a
+            // little so the extra height does not reach back up towards the board.
+            _potHolder.sizeDelta = new Vector2(460f, 92f);
+            _potHolder.anchoredPosition = new Vector2(0f, -86f);
 
             var potRow = _potHolder.gameObject.AddComponent<HorizontalLayoutGroup>();
             potRow.childAlignment = TextAnchor.MiddleCenter;
