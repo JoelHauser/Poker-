@@ -676,20 +676,18 @@ the install, which is how Blackjack ships. It carries only this mod's two
 assemblies and `config.json` -- SPT provides its own, and a second copy of those in
 one process is a load conflict waiting to happen.
 
-**What v0.1.0 was.** It loaded, announced itself, served six routes, read wallet
-balances and played hold'em -- over HTTP and from a table inside the game --
-**without moving a rouble**. Confirmed on a real 4.1.3 install rather than inferred.
-
-**What it does now.** It moves money. **One chip is one rouble**: the buy-in is
-debited when the player sits down, whatever is in front of them is credited when they
-stand up, and a session that never finished is paid back on next contact. The startup
+**What it does.** Loads, announces itself, serves six routes on two transports, deals
+real no-limit hold'em against the bots from a table inside the game, and **moves
+money**: one chip to one rouble, the buy-in debited on sitting down, the stack
+credited on standing up, an unfinished session paid back on next contact. The startup
 banner says so out loud, because a mod that takes currency out of a stash should
 announce itself before it does.
 
-**Not yet run against a real profile.** The money path is covered by fifteen tests on
-fakes and mutation-checked, but every `InventoryHelper` call in `Bank` is still code
-that has never executed on a live server. Smoke it with `-PingOnly` first, then with
-a small buy-in, and watch the console.
+**What has actually been run.** The loading, routing and playing were confirmed on a
+real 4.1.3 install. **The money has not been.** It is covered by 21 tests on fakes and
+mutation-checked, but every `InventoryHelper` call in `Bank` is code that has never
+executed on a live server -- which is precisely the gap Blackjack's money path went
+wrong in. `-PingOnly` first, then a small buy-in on the test profile, console open.
 
 ### The client plugin
 
@@ -777,10 +775,15 @@ searches for the fewest chips that make the amount exactly, in units of the 5,00
 the denominations share, and reports anything genuinely unrepresentable as a
 remainder rather than rounding it away.
 
-**The wallet ceilings do not yet agree with this.** `Wallets.cs` caps a rouble
-buy-in at 500,000, well under the 2,000,000 chip buy-in. Harmless while the chips
-are notional, and it is exactly the "chip denomination" open item: either a chip is
-not a rouble, or that ceiling rises. Settle it with the money path.
+**Settled with the money path: a chip is a rouble, and the ceiling rose.** The rouble
+buy-in was capped at 500,000, well under the 2,000,000 chip buy-in, so the table asked
+for money the wallet refused. The cap is 5,000,000 now. It cost nothing while the
+chips were notional and became blocking the moment they were not, which is the usual
+shape of a deferred contradiction.
+
+The same rate is why no other wallet can sit down yet: one chip to the unit means a
+2,000,000 chip table needs 2,000,000 of something, and nothing but roubles is held in
+those numbers. A chips-per-unit rate per wallet is what opens the rest up.
 
 ## The money
 
@@ -1120,13 +1123,17 @@ These were settled there against the real client and apply unchanged.
 ## Verifying
 
 ```
-dotnet test    # 189 tests, no SPT needed. About 8s.
+dotnet test    # 210 tests, no SPT needed. About 11s.
 ```
 
-**Distrust a suite that passes first time.** Mutation-check anything that ranks a
-hand or moves money -- see the evaluator and pot builder notes above for the
-pattern, and port Blackjack's `MoneyInvariantTests` before writing settlement
-rather than after.
+189 over the engine and 21 over the money and both transports. Neither needs a server:
+the money tests run on fakes, which is the whole reason they could be written before
+the settlement they check.
+
+**Distrust a suite that passes first time.** Every one of the six mutation runs in
+this file caught faults the green suite had not, and three of them turned out to be
+holes in the tests rather than in the code. Mutation-check anything that ranks a hand
+or moves money.
 
 **Chips are conserved. That is the invariant hold'em has and UTH did not.** Every
 hand starts with a known number of chips at the table and must end with the same
@@ -1152,9 +1159,12 @@ resolved and the profile can be read.
 ## Releasing
 
 Mirror Blackjack: `releases/Poker-<ver>-SPT4.1.zip`, laid out as
-**`SPT_Runtime/user/mods/Poker/`** and extracted at the root of the install. Not
-`user/mods/Poker/` -- that is the same mistake the note about the runtime folder
-warns against, and it produces a mod nothing ever loads.
+**`SPT_Runtime/user/mods/Poker/`** plus `BepInEx/plugins/Poker/`, and extracted at the
+root of the install. Not `user/mods/Poker/` -- that is the same mistake the note about
+the runtime folder warns against, and it produces a mod nothing ever loads.
+
+A zip built without `-InstallPath` is named **`-server-only`** and contains no client
+plugin, because there was nothing to compile one against. Do not ship that one.
 
 The version lives in **two** places and they must agree: the server csproj
 `<Version>` and `ModMetadata.Version`. `pack-mod.ps1` reads the version back out of
@@ -1178,27 +1188,30 @@ claiming the server did not exist, four commits after it shipped -- a fresh sess
 reads this first and would have started building one.
 
 - Working branch **`uth`** (named before the variant changed), off `main`.
-- `Poker.Game` green at **189 tests** in about 8 seconds, mutation-checked
-  throughout. Every test builds its own `HoldemRules`, so the stakes can be retuned
-  without touching the suite.
+- Green at **210 tests** -- 189 over the engine, 21 over the money -- mutation-checked
+  throughout. Every engine test builds its own `HoldemRules`, so the stakes can be
+  retuned without touching the suite.
 - **The variant is no-limit Texas Hold'em against bots**, decided after two
   reversals. See the top of this file, and read it before reopening the question.
-- **The mod is installed and works in the game.** Server and client both build and
-  are deployed to `H:\SPT4.1.X`. There is a POKER button on the main menu, and the
-  table deals, plays and settles from inside Tarkov.
-- **Verified on the real install rather than inferred**: the version gate passes,
-  the six routes register, the session resolves, the wallets read, and hands play
-  through all four streets with re-raises, folds, side stacks and all-ins. Folded
-  seats stay face down at showdown.
+- **The mod has run in the game**, as of the build that added the table. There is a
+  POKER button on the main menu, and hands deal, play and settle from inside Tarkov:
+  the version gate passes, the six routes register, the session resolves, the wallets
+  read, and hands run through all four streets with re-raises, folds, side stacks and
+  all-ins. Folded seats stay face down at showdown.
+- **Everything since that build is unverified**, which is most of the money and all
+  of the recent client work. What was true then is not a claim about what is in the
+  tree now.
 - **The bots have names** from the game's own PMC list -- Badaimnet, Nick,
   CEOofHeadEyes -- and one agent per seat, so they are genuinely different people.
 - **The chips are real art with real denominations**, and the stakes were retuned
   to fit them: blinds 10k / 20k, buy-in 2,000,000.
 - **The mod moves money.** One chip is one rouble: the buy-in is debited on sitting
-  down and the stack credited on standing up. Covered by 15 tests on fakes and
-  mutation-checked, but **not yet run against a real profile** -- every
-  `InventoryHelper` call in `Bank` is code that has never executed on a live server.
-  See "The money".
+  down and the stack credited on standing up, over both transports. **Not yet run
+  against a real profile** -- every `InventoryHelper` call in `Bank` is code that has
+  never executed on a live server. See "The money".
+- **Four commits of client work have never been compiled** -- `ProfileSync`, the
+  buy-in confirmation, the pot column and the close fade. `Poker.Client` is `net472`
+  against the install and cannot be built anywhere else.
 - A complete UTH game is in the tree and **parked**. It is green and does no harm;
   nothing new should call into it.
 
@@ -1214,12 +1227,11 @@ reads this first and would have started building one.
   targets `net472` against the install and cannot be built on a machine without the
   game. That is the first thing to do at the SPT box.
 - **Give each wallet a chips-per-unit rate.** One chip to one unit means only roubles
-  can buy into a 2,000,000 chip table; dollars, euros and the valuables are refused
-  by name. A rate per wallet is what opens them up.
+  can buy into a 2,000,000 chip table -- dollars, euros and the valuables are refused
+  by name, and their ceilings in `Wallets.cs` are still sized for a game they cannot
+  currently enter. A rate per wallet is what opens them up.
 - **`StatsStore` is still to port**, and the recorded fields are poker's rather than
   blackjack's -- hands played, biggest pot, showdowns won, best hand.
-- The rouble buy-in ceiling was raised to 5,000,000 to admit the 2,000,000 buy-in.
-  The valuables' ceilings are still sized for a game they cannot currently enter.
 
 **The client**
 
@@ -1237,12 +1249,12 @@ reads this first and would have started building one.
   `PokerService.Reseat` improvises somebody and swaps the agent, so the table turns
   over on its own. Still missing: **engine-emitted reactions**, and **thinking time
   taken from how close the decision was**. See "They have to feel like real people".
-- **Decide the re-seating policy deliberately.** Three places now buy seats back in
-  and they do not agree: the console tops everybody up, `PokerService` replaces a
-  busted bot with a stranger and tops the player up for free, and `HoldemTable`
-  itself only supplies the mechanism. A cash game, a tournament and "a stranger sits
-  down" are three different answers, and the money path will force a choice --
-  topping the player up stops being free the moment the chips are real.
+- **Re-seating is settled for the mod and deliberately different in the console.**
+  `PokerService` replaces a busted bot with a new improvised character and **refuses
+  to deal to a broke player** -- their chips cost currency, so a fresh stack is a
+  fresh buy-in. The console tops everybody up, which is right for a harness and would
+  be minting roubles anywhere else. `HoldemTable.Reseat` supplies the mechanism and
+  takes no view.
 - Decide UTH's fate -- delete, ship as a second table, or leave parked. Undecided
   on purpose; it costs nothing where it is.
 
