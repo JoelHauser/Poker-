@@ -103,7 +103,7 @@ means the gate, not a bug in the game code.
 | Project | Owns |
 | --- | --- |
 | `src/Poker.Game` | Rules engine. No SPT reference, no I/O, no clock. |
-| `tests/Poker.Server.Tests` | 15 tests over the money, on fakes. No SPT server needed. |
+| `tests/Poker.Server.Tests` | 21 tests over the money and both transports, on fakes. No SPT server needed. |
 | `tests/Poker.Game.Tests` | 189 tests. The evaluator, pot builder, log, hold'em table and bots are live; the paytables, UTH table and strategy are parked. |
 | `src/Poker.Server` | The mod: routes, DI, logging, and the money. |
 | `src/Poker.Client` | The BepInEx half: menu button, table panel, card and chip art. `net472`, built against the install. |
@@ -827,6 +827,43 @@ session; an end-of-run balance check would miss errors that cancel.
 `TheBotsNeverTouchTheBank` is the other one worth keeping: twenty hands of four
 seats betting, raising and busting must move the wallet by exactly nothing.
 
+### Two transports, one service
+
+`PokerRouter` serves plain static paths and `PokerItemEventRouter` serves the same
+five actions on the endpoint EFT already uses for moving items. They share a
+service on purpose -- a second copy of the flow would be a second set of money
+bugs -- and `BothTransportsMoveTheSameMoney` pins that.
+
+The difference is only what comes back. A static route returns JSON and the
+client's stash goes stale; an item event returns the `ItemEventRouterResponse` SPT
+itself filled in, so the inventory updates without a reload. The table rides along
+in `ExtensionData` under `poker`, because **an item-event reply carries
+`ProfileChanges` and nothing else** -- and a second request for the view is a
+second chance for the two to disagree.
+
+### `ProfileSync`, and why a stale stash is not only cosmetic
+
+Money moved through a static route lands in the profile and leaves the running game
+none the wiser. That looks like a display fault and is worse than one: the client
+goes on believing in stacks the server has deleted, so the next stack the player
+drags produces
+
+    Unable to merge stacks as destination item: ... cannot be found
+
+SPT holds a session's profile changes until the client's next item event and hands
+them back on that reply. So the fix is not to re-send the money -- it has already
+moved -- but to give the client a reason to ask. `ProfileSync.Request()` sends an
+event that does nothing at all, and is called after the buy-in and after the
+cash-out. `PokerActions.Sync` is the server half and the two names must stay in
+step.
+
+### The buy-in asks first
+
+`SIT DOWN` was written when sitting down was free. It now spends two million
+roubles, so the price is on the button and the button asks twice. The seats, chips
+and blinds are constants in one place so the label cannot drift from the request --
+which is the same failure the five stake defaults have, one screen further out.
+
 ## Things that will bite you
 
 Carried over from Blackjack. Each cost real time there. None are hypothetical, and
@@ -1141,9 +1178,10 @@ reads this first and would have started building one.
 - **Smoke it against a profile.** `-PingOnly` first, then a small buy-in on the test
   profile, watching the console. Every `InventoryHelper` call in `Bank` is still code
   that has never executed. Blackjack's equivalent went wrong in exactly this gap.
-- **Port `ProfileSync` and add the item-event transport.** Money now moves in the
-  profile while the stash on screen stays stale until reload, which reads to a player
-  as the mod eating their winnings. This is the next real piece of work.
+- **Build and smoke the client changes.** `ProfileSync`, the item-event calls and the
+  buy-in confirmation are written but **have never been compiled** -- `Poker.Client`
+  targets `net472` against the install and cannot be built on a machine without the
+  game. That is the first thing to do at the SPT box.
 - **Give each wallet a chips-per-unit rate.** One chip to one unit means only roubles
   can buy into a 2,000,000 chip table; dollars, euros and the valuables are refused
   by name. A rate per wallet is what opens them up.

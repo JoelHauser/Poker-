@@ -1,4 +1,5 @@
 using Poker.Game;
+using SPTarkov.Server.Core.Models.Eft.Common.Request;
 using SPTarkov.Server.Core.Models.Utils;
 
 namespace Poker.Server;
@@ -131,3 +132,38 @@ public record PokerResponse
 
     public static PokerResponse Failed(string error) => new() { Ok = false, Error = error };
 }
+
+
+// The item-event shapes. Same fields as the static requests above, but derived from
+// BaseInteractionRequestData so they arrive on the endpoint EFT already uses for
+// moving items -- which is what lets the reply carry ProfileChanges and keep the
+// stash in step. The base class already owns `Action`, which carries the event name.
+
+public record PokerSitAction : BaseInteractionRequestData
+{
+    public int Seats { get; set; } = 4;
+
+    public int BuyIn { get; set; } = 2_000_000;
+
+    public int BigBlind { get; set; } = 20_000;
+
+    public string Wallet { get; set; } = nameof(Server.Wallet.Roubles);
+}
+
+public record PokerDealAction : BaseInteractionRequestData;
+
+/// <summary>Named Move because the base class already owns Action.</summary>
+public record PokerActAction : BaseInteractionRequestData
+{
+    public string Move { get; set; } = string.Empty;
+
+    public int To { get; set; }
+}
+
+public record PokerLeaveAction : BaseInteractionRequestData;
+
+/// <summary>
+/// Carries nothing, because it asks for nothing. Sent when the client needs the
+/// profile changes the server has been holding for it.
+/// </summary>
+public record PokerSyncAction : BaseInteractionRequestData;

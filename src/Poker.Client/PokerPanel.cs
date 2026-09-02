@@ -146,9 +146,41 @@ namespace Poker.Client
 
         // ---------------------------------------------------------------- actions
 
+        /// <summary>Seats, chips and blinds, in one place so the label cannot lie.</summary>
+        private const int TableSeats = 5;
+
+        private const int BuyInChips = 2_000_000;
+
+        private const int BigBlindChips = 20_000;
+
+        /// <summary>Thousands separators without depending on the machine's locale.</summary>
+        private static string Roubles(int amount) =>
+            amount.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+
+        /// <summary>
+        /// Asks before spending anything.
+        ///
+        /// Sitting down used to be free and is not any more: it debits the buy-in from
+        /// a real stash. A single unlabelled button that quietly takes two million
+        /// roubles is the kind of thing a player only finds out about afterwards, so
+        /// the price goes on the button and the button asks twice.
+        /// </summary>
+        private static void ConfirmSit()
+        {
+            SetStatus(
+                "This will take " + Roubles(BuyInChips) + " roubles from your stash and put it"
+                + " on the table as chips. Whatever is left when you stand up comes back.");
+
+            BuildActions(new[]
+            {
+                Action("BUY IN FOR " + Roubles(BuyInChips), Sit),
+                Action("NOT YET", ShowLobby),
+            });
+        }
+
         private static void Sit()
         {
-            var reply = PokerApi.Sit(seats: 5, buyIn: 2_000_000, bigBlind: 20_000);
+            var reply = PokerApi.Sit(seats: TableSeats, buyIn: BuyInChips, bigBlind: BigBlindChips);
 
             if (!Ok(reply))
             {
@@ -156,12 +188,22 @@ namespace Poker.Client
                 return;
             }
 
+            // The buy-in has just left the stash. Without this the game keeps showing
+            // roubles the server has already deleted, and the next stack the player
+            // drags fails to merge against an item that is no longer there.
+            ProfileSync.Request();
+
             Render(reply);
         }
 
         private static void Leave()
         {
             PokerApi.Leave();
+
+            // The chips have just come back as currency, so the same applies in the
+            // other direction.
+            ProfileSync.Request();
+
             ShowLobby();
         }
 
@@ -221,12 +263,13 @@ namespace Poker.Client
             SetPot(null);
 
             SetStatus(
-                "Five seats, 2,000,000 in chips, blinds 10k / 20k."
-                + "     The chips are notional in this build -- nothing is at stake.");
+                TableSeats + " seats, blinds 10k / 20k."
+                + "     Buying in costs " + Roubles(BuyInChips) + " roubles from your stash."
+                + " You take back whatever is in front of you when you stand up.");
 
             BuildActions(new[]
             {
-                Action("SIT DOWN", Sit),
+                Action("SIT DOWN", ConfirmSit),
                 Action("CLOSE", Close),
             });
         }
