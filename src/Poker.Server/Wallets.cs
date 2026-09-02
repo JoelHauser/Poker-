@@ -58,7 +58,7 @@ public sealed record WalletInfo(
     /// </summary>
     private static readonly Dictionary<Wallet, WalletInfo> Table = new()
     {
-        [Wallet.Roubles] = new(Wallet.Roubles, WalletKind.Currency, Money.ROUBLES, "R", "Roubles", 10_000, 500_000),
+        [Wallet.Roubles] = new(Wallet.Roubles, WalletKind.Currency, Money.ROUBLES, "R", "Roubles", 100_000, 5_000_000),
         [Wallet.Dollars] = new(Wallet.Dollars, WalletKind.Currency, Money.DOLLARS, "$", "Dollars", 100, 5_000),
         [Wallet.Euros] = new(Wallet.Euros, WalletKind.Currency, Money.EUROS, "E", "Euros", 100, 5_000),
 

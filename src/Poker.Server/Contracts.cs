@@ -19,8 +19,20 @@ public record SitRequest : IRequestData
     /// <summary>Seats including the player. Two to five.</summary>
     public int Seats { get; set; } = 4;
 
-    /// <summary>Chips each seat starts with. Not currency -- see the note on the service.</summary>
+    /// <summary>
+    /// Chips each seat starts with, and -- at one chip to the unit -- what the buy-in
+    /// costs the player out of <see cref="Wallet"/>.
+    /// </summary>
     public int BuyIn { get; set; } = 2_000_000;
+
+    /// <summary>
+    /// What the buy-in is paid in. One chip is one unit of it.
+    ///
+    /// That rate is why only roubles work at these stakes: a 2,000,000 chip buy-in is
+    /// 2,000,000 roubles, and no other wallet is held in those numbers. Giving each
+    /// wallet its own chips-per-unit rate is what would open the rest up.
+    /// </summary>
+    public string Wallet { get; set; } = nameof(Server.Wallet.Roubles);
 
     public int BigBlind { get; set; } = 20_000;
 
@@ -67,10 +79,10 @@ public record PingResponse
     public Dictionary<string, BuyInLimits> Limits { get; init; } = [];
 
     /// <summary>
-    /// True while the table plays for chips that are not currency. Sent so the client
-    /// can say so plainly rather than implying a stash is at stake.
+    /// False now that the buy-in is real. Kept on the wire so a client built against
+    /// the earlier build still gets a truthful answer rather than an absent field.
     /// </summary>
-    public bool ChipsAreNotional { get; init; } = true;
+    public bool ChipsAreNotional { get; init; }
 }
 
 public record BuyInLimits
@@ -98,6 +110,24 @@ public record PokerResponse
 
     /// <summary>Who is sitting at the table, in seat order. Empty until sat down.</summary>
     public IReadOnlyList<string> Characters { get; init; } = [];
+
+    /// <summary>
+    /// Balance in the wallet the table is bought into, after whatever just happened.
+    ///
+    /// Sent explicitly because a static route does not flow through the item-event
+    /// router, so the client's own inventory model is stale until it refreshes. The
+    /// UI must trust this over anything it computes locally.
+    /// </summary>
+    public int Balance { get; init; }
+
+    public string Wallet { get; init; } = nameof(Server.Wallet.Roubles);
+
+    /// <summary>
+    /// Something worth recording that is not a fault -- currently only a stack given
+    /// back after a crash. Without it a recovered buy-in reaches the log as an
+    /// unexplained credit, which looks identical to a payout bug.
+    /// </summary>
+    public string? Note { get; init; }
 
     public static PokerResponse Failed(string error) => new() { Ok = false, Error = error };
 }

@@ -103,13 +103,12 @@ means the gate, not a bug in the game code.
 | Project | Owns |
 | --- | --- |
 | `src/Poker.Game` | Rules engine. No SPT reference, no I/O, no clock. |
+| `tests/Poker.Server.Tests` | 15 tests over the money, on fakes. No SPT server needed. |
 | `tests/Poker.Game.Tests` | 189 tests. The evaluator, pot builder, log, hold'em table and bots are live; the paytables, UTH table and strategy are parked. |
-| `src/Poker.Server` | The mod: routes, DI, logging, wallet reading. **Moves no money yet.** |
+| `src/Poker.Server` | The mod: routes, DI, logging, and the money. |
 | `src/Poker.Client` | The BepInEx half: menu button, table panel, card and chip art. `net472`, built against the install. |
 | `tools/Poker.Console` | Terminal table and soak harness. No SPT needed. See "The harness". |
 | `scripts/` | `pack-mod.ps1` builds the droppable zip, `pack-console.ps1` the harness, `smoke.ps1` drives a real server. |
-
-Still to come, mirroring Blackjack: `tests/Poker.Server.Tests`.
 
 The engine knows nothing about currency -- it takes an `int` and returns an `int`.
 Everything that maps a `Wallet` to an item template lives in `Wallets.cs` and
@@ -670,20 +669,20 @@ the install, which is how Blackjack ships. It carries only this mod's two
 assemblies and `config.json` -- SPT provides its own, and a second copy of those in
 one process is a load conflict waiting to happen.
 
-**What v0.1.0 is.** It loads, announces itself, registers six static routes, reads
-wallet balances, and plays real no-limit hold'em against the bots -- over HTTP and
-from a table inside the game. **Confirmed on a real 4.1.3 install**, not inferred:
-the version gate passes, DI resolves, the routes register, the session resolves and
-the wallets read.
+**What v0.1.0 was.** It loaded, announced itself, served six routes, read wallet
+balances and played hold'em -- over HTTP and from a table inside the game --
+**without moving a rouble**. Confirmed on a real 4.1.3 install rather than inferred.
 
-**What it is not.** It **moves no money**: the chips are notional, sitting down
-costs nothing and cashing out pays nothing. That is a deliberate stopping point
-rather than an oversight. A mod that cannot move money cannot lose any, so the
-parts that load, route and play get proven against a real profile before the money
-path -- the part that cost Blackjack the most -- is written.
+**What it does now.** It moves money. **One chip is one rouble**: the buy-in is
+debited when the player sits down, whatever is in front of them is credited when they
+stand up, and a session that never finished is paid back on next contact. The startup
+banner says so out loud, because a mod that takes currency out of a stash should
+announce itself before it does.
 
-The startup banner says so out loud, because the alternative is somebody watching
-a stash that never changes and concluding the mod is broken.
+**Not yet run against a real profile.** The money path is covered by fifteen tests on
+fakes and mutation-checked, but every `InventoryHelper` call in `Bank` is still code
+that has never executed on a live server. Smoke it with `-PingOnly` first, then with
+a small buy-in, and watch the console.
 
 ### The client plugin
 
@@ -775,6 +774,58 @@ remainder rather than rounding it away.
 buy-in at 500,000, well under the 2,000,000 chip buy-in. Harmless while the chips
 are notional, and it is exactly the "chip denomination" open item: either a chip is
 not a rouble, or that ceiling rises. Settle it with the money path.
+
+## The money
+
+**One chip is one rouble.** The buy-in is debited on sitting down, the stack is
+credited on standing up, and the difference is what the player won or lost. That
+rate is also why roubles are the only wallet that works at these stakes: a
+2,000,000 chip table cannot be bought into with four bitcoin, and nothing else is
+held in numbers like these. Giving each wallet a chips-per-unit rate is what would
+open the rest up.
+
+### Escrow holds the live stack, and that is the whole difference from Blackjack
+
+Blackjack's escrow recorded a *stake* until a hand settled and then dropped it.
+That is not enough here. One buy-in is taken and the player then holds a number
+that moves every hand, so what is owed back moves with it -- and a crash has to
+return **what they actually have**. Recording the buy-in and stopping would refund
+a player who had lost most of it and rob one who had doubled up, both silently,
+and both looking like a payout bug rather than a bookkeeping one.
+
+So `EscrowStore.Record` **replaces** rather than accumulates, and is called after
+every hand. `EscrowFollowsTheStackRatherThanTheBuyIn` pins it, and asserts the
+recorded value actually changes -- without that, recording the buy-in every time
+would pass.
+
+### The order of the last two lines matters
+
+The cash-out credits **before** it releases escrow. A crash between them leaves the
+stack recorded and refundable, which is the safe way round; the other order pays
+nothing and forgets it was owed. Deleting the release entirely fails five tests,
+which is the shape of that mistake.
+
+### A busted player is not topped up
+
+The console tops everybody up and is right to -- it is a harness. Here the chips
+cost currency, so a fresh stack is a fresh buy-in and has to be asked for.
+`PokerService.Deal` refuses rather than creating chips out of nothing. Busted
+*bots* are still replaced by new characters, which costs nobody anything.
+
+### Mutation-checked, seven faults, each caught
+
+Escrow recording the buy-in rather than the stack (2 fail), the cash-out paying the
+buy-in rather than the stack (6), escrow never released (5), an abandoned stack
+never given back (2), the buy-in taken without checking it could be afforded (1),
+a busted player topped up for free (1), and money never flushed to disk (1).
+
+**`MoneyInvariantTests` was written before the settlement it checks**, which is the
+instruction this file has carried since before there was a server. The invariant is
+that the change in the wallet equals the change in the stack across a whole
+session; an end-of-run balance check would miss errors that cancel.
+
+`TheBotsNeverTouchTheBank` is the other one worth keeping: twenty hands of four
+seats betting, raising and busting must move the wallet by exactly nothing.
 
 ## Things that will bite you
 
@@ -1075,36 +1126,31 @@ reads this first and would have started building one.
   CEOofHeadEyes -- and one agent per seat, so they are genuinely different people.
 - **The chips are real art with real denominations**, and the stakes were retuned
   to fit them: blinds 10k / 20k, buy-in 2,000,000.
-- **The mod moves no money.** Chips are notional, so it is safe to point at a real
-  profile. See "Shipping it to an install".
+- **The mod moves money.** One chip is one rouble: the buy-in is debited on sitting
+  down and the stack credited on standing up. Covered by 15 tests on fakes and
+  mutation-checked, but **not yet run against a real profile** -- every
+  `InventoryHelper` call in `Bank` is code that has never executed on a live server.
+  See "The money".
 - A complete UTH game is in the tree and **parked**. It is green and does no harm;
   nothing new should call into it.
 
 ### Open items
 
-**The money -- the next real piece of work**
+**The money -- written, tested on fakes, never run for real**
 
-- **Wire the buy-in and cash-out.** `IBank` reads balances and nothing else; debit,
-  credit and the shortfall-to-mail path are still to port from Blackjack's `Bank`.
-- **Buy-in and cash-out replace per-hand settlement**, which Blackjack did not have
-  to do. `EscrowStore` must hold the player's **current stack**, updated as it
-  changes, not the amount they sat down with -- a crash mid-session has to return
-  what they actually have.
-- **Reconcile the chip buy-in with the wallet ceilings.** 2,000,000 chips against a
-  500,000 rouble cap: either a chip is not a rouble, or the ceiling rises. See "The
-  chips, and the stakes that follow from them".
-- **Set the wallet ceilings from the buy-in**, not from a paytable. The most a
-  session can return is roughly `buy-in x seats`; bitcoin and Lega medals, which do
-  not stack, are the binding constraint -- and all three valuable wallets are at
-  zero on the test profile, so none can be exercised by betting yet.
-- Port `EscrowStore`, `StatsStore` and `Fakes` from Blackjack; they are currency
-  plumbing and carry no blackjack rules. `Bank` and `ProfileGateway` are already
-  here but **half-ported on purpose** -- `Bank` reads balances and stack limits and
-  has neither `TryDebit` nor `Credit`, and `ProfileGateway` has `HasProfile` without
-  `SaveAsync`. That is what makes this build unable to move money.
-- Port `MoneyInvariantTests` **before** writing settlement, not after.
-- Port `ProfileSync` and add the item-event transport with it, or money will move
-  in the profile while the stash on screen stays stale.
+- **Smoke it against a profile.** `-PingOnly` first, then a small buy-in on the test
+  profile, watching the console. Every `InventoryHelper` call in `Bank` is still code
+  that has never executed. Blackjack's equivalent went wrong in exactly this gap.
+- **Port `ProfileSync` and add the item-event transport.** Money now moves in the
+  profile while the stash on screen stays stale until reload, which reads to a player
+  as the mod eating their winnings. This is the next real piece of work.
+- **Give each wallet a chips-per-unit rate.** One chip to one unit means only roubles
+  can buy into a 2,000,000 chip table; dollars, euros and the valuables are refused
+  by name. A rate per wallet is what opens them up.
+- **`StatsStore` is still to port**, and the recorded fields are poker's rather than
+  blackjack's -- hands played, biggest pot, showdowns won, best hand.
+- The rouble buy-in ceiling was raised to 5,000,000 to admit the 2,000,000 buy-in.
+  The valuables' ceilings are still sized for a game they cannot currently enter.
 
 **The client**
 

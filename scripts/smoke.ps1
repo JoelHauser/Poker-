@@ -8,9 +8,9 @@
     real profile, and its money can be read. If the ping fails there is no point
     running the rest.
 
-    Nothing here stakes real currency. The chips in this build are notional -- sitting
-    down costs nothing and cashing out pays nothing -- so it is safe to point at a
-    real profile.
+    THIS STAKES REAL CURRENCY. Sitting down debits the buy-in from the profile and
+    standing up pays back whatever is left, at one chip to the rouble. Use -PingOnly
+    if you only want to prove the mod is loaded and reachable.
 
     Watch the server console alongside this. Every line the mod writes is prefixed
     "[Poker]", so it can be filtered out of the noise.
@@ -120,6 +120,10 @@ foreach ($wallet in $ping.balances.PSObject.Properties) {
 if ($ping.chipsAreNotional) {
     Write-Host ""
     Write-Host "  The chips are notional in this build. Nothing above is at stake." -ForegroundColor DarkGray
+}
+else {
+    Write-Host ""
+    Write-Host "  Sitting down will debit $BuyIn from the balance above." -ForegroundColor Yellow
 }
 
 if ($PingOnly) {

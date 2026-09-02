@@ -21,7 +21,7 @@ public record PokerConfig
 /// picked out of a busy server console with one filter on "[Poker]".
 /// </summary>
 [Injectable(InjectionType.Singleton)]
-public class PokerLog
+public class PokerLog : IPokerLog
 {
     private const string Prefix = "[Poker]";
 
@@ -62,6 +62,8 @@ public class PokerLog
     public void Success(string message) => _logger.Success($"{Prefix} {message}");
 
     public void Info(string message) => _logger.Info($"{Prefix} {message}");
+
+    void IPokerLog.Error(string message) => Error(message);
 
     public void Error(string message, Exception? ex = null) =>
         _logger.Error($"{Prefix} {message}{(ex is null ? string.Empty : $" -- {ex}")}");

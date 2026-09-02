@@ -1,6 +1,7 @@
 using SPTarkov.DI.Annotations;
 using SPTarkov.Server.Core.Helpers.Profile;
 using SPTarkov.Server.Core.Models.Common;
+using SPTarkov.Server.Core.Servers;
 
 namespace Poker.Server;
 
@@ -9,8 +10,11 @@ namespace Poker.Server;
 /// interface, so the service can be tested without a running server.
 /// </summary>
 [Injectable]
-public class ProfileGateway(ProfileHelper profileHelper) : IProfileGateway
+public class ProfileGateway(ProfileHelper profileHelper, SaveServer saveServer) : IProfileGateway
 {
+    /// <summary>Money that is not flushed to disk did not move.</summary>
+    public async Task SaveAsync(MongoId sessionId) => await saveServer.SaveProfileAsync(sessionId);
+
     public bool HasProfile(MongoId sessionId)
     {
         // GetPmcProfile throws on an empty id rather than returning null, so asking it

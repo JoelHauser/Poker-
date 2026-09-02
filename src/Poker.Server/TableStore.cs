@@ -17,6 +17,9 @@ public sealed class PlayerSession
     public required List<BotAgent> Agents { get; init; }
 
     public required int BuyIn { get; init; }
+
+    /// <summary>What the buy-in was paid in, and what the cash-out returns.</summary>
+    public required Wallet Wallet { get; init; }
 }
 
 /// <summary>

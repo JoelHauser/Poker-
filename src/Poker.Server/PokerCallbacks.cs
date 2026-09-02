@@ -1,5 +1,7 @@
 using SPTarkov.DI.Annotations;
 using SPTarkov.Server.Core.Models.Common;
+using SPTarkov.Server.Core.Models.Eft.ItemEvent;
+using SPTarkov.Server.Core.Routers;
 using SPTarkov.Server.Core.Utils;
 
 namespace Poker.Server;
@@ -15,6 +17,7 @@ namespace Poker.Server;
 public class PokerCallbacks(
     HttpResponseUtil httpResponseUtil,
     PokerService service,
+    EventOutputHolder eventOutputHolder,
     IBank bank,
     PokerLog log)
 {
@@ -42,10 +45,10 @@ public class PokerCallbacks(
         return new ValueTask<string>(httpResponseUtil.NoBody(response));
     }
 
-    public ValueTask<string> Sit(SitRequest info, MongoId sessionId)
+    public async ValueTask<string> Sit(SitRequest info, MongoId sessionId)
     {
-        Received("sit", sessionId, $"{info.Seats} seats, {info.BuyIn} chips, blind {info.BigBlind}");
-        return new ValueTask<string>(Respond(service.Sit(info, sessionId)));
+        Received("sit", sessionId, $"{info.Seats} seats, {info.BuyIn} {info.Wallet}, blind {info.BigBlind}");
+        return Respond(await service.SitAsync(info, sessionId, Output(sessionId)));
     }
 
     public ValueTask<string> Deal(DealRequest info, MongoId sessionId)
@@ -66,11 +69,26 @@ public class PokerCallbacks(
         return new ValueTask<string>(Respond(service.State(sessionId)));
     }
 
-    public ValueTask<string> Leave(LeaveRequest info, MongoId sessionId)
+    public async ValueTask<string> Leave(LeaveRequest info, MongoId sessionId)
     {
         Received("leave", sessionId, null);
-        return new ValueTask<string>(Respond(service.Leave(sessionId)));
+        return Respond(await service.LeaveAsync(sessionId, Output(sessionId)));
     }
+
+    /// <summary>
+    /// A response object SPT's own inventory helpers can write into.
+    ///
+    /// It must come from EventOutputHolder, not from `new`. A fresh
+    /// ItemEventRouterResponse initialises none of its properties, and
+    /// RemoveItemByCount reaches straight into output.ProfileChanges[sessionId], so a
+    /// hand-built one throws NullReferenceException -- *after* the items have already
+    /// been taken. On Blackjack that failure reported itself as "not enough roubles"
+    /// while the stake had quietly left the stash.
+    ///
+    /// A static route cannot return this to the client, so the stash view stays stale
+    /// until reload. Being unread is fine; being uninitialised is not.
+    /// </summary>
+    private ItemEventRouterResponse Output(MongoId sessionId) => eventOutputHolder.GetOutput(sessionId);
 
     /// <summary>
     /// Prints the stack limits actually in force, once per server run.
@@ -101,6 +119,13 @@ public class PokerCallbacks(
 
     private string Respond(PokerResponse response)
     {
+        // Always written, not gated on verbose: a stack reappearing needs a reason
+        // beside it or it reads as a payout bug.
+        if (response.Note is not null)
+        {
+            log.Info(response.Note);
+        }
+
         if (!response.Ok)
         {
             log.Detail($"<- refused: {response.Error}");

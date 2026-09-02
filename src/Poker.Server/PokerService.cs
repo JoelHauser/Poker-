@@ -1,6 +1,7 @@
 using Poker.Game;
 using SPTarkov.DI.Annotations;
 using SPTarkov.Server.Core.Models.Common;
+using SPTarkov.Server.Core.Models.Eft.ItemEvent;
 
 namespace Poker.Server;
 
@@ -12,20 +13,19 @@ namespace Poker.Server;
 /// <see cref="TableStore"/>, so it runs -- and can be tested -- with no SPT server
 /// present. HTTP and logging live in <see cref="PokerCallbacks"/>.
 ///
-/// **The chips are not currency in this build.** Sitting down costs nothing and
-/// cashing out pays nothing; the stacks are numbers in memory. That is a deliberate
-/// stopping point rather than an oversight: it makes the mod safe to point at a real
-/// profile while the parts that load, route and play are proven, and it keeps the
-/// money path -- the part that cost Blackjack the most -- for a build where the rest
-/// is known to work.
+/// **One chip is one unit of the wallet the table is bought into.** Sitting down
+/// debits the buy-in, standing up credits whatever is left, and between those two the
+/// player's stack is the only record of what they are owed -- which is why every hand
+/// writes it to escrow.
 /// </summary>
 [Injectable]
 public class PokerService(
     IBank bank,
     IProfileGateway profiles,
     TableStore tables,
+    IEscrowStore escrow,
     INameSource names,
-    PokerLog log)
+    IPokerLog log)
 {
     /// <summary>Cheap health check. Touches nothing and starts no game.</summary>
     public PingResponse Ping(MongoId sessionId)
@@ -55,12 +55,26 @@ public class PokerService(
         };
     }
 
-    public PokerResponse Sit(SitRequest request, MongoId sessionId)
+    public async Task<PokerResponse> SitAsync(SitRequest request, MongoId sessionId, ItemEventRouterResponse output)
     {
         if (!profiles.HasProfile(sessionId))
         {
             return PokerResponse.Failed("No PMC profile for this session.");
         }
+
+        if (tables.Get(sessionId) is not null)
+        {
+            return PokerResponse.Failed("You are already at a table. Leave it first and take your chips.");
+        }
+
+        if (!Enum.TryParse<Wallet>(request.Wallet, ignoreCase: true, out var wallet))
+        {
+            return PokerResponse.Failed($"Unknown currency '{request.Wallet}'.");
+        }
+
+        // Anything owed from a session that never finished goes back before another
+        // buy-in is taken, or the two would be indistinguishable in the stash.
+        var note = RefundAbandoned(sessionId, output);
 
         if (request.Seats is < 2 or > 5)
         {
@@ -77,6 +91,32 @@ public class PokerService(
             return PokerResponse.Failed(
                 $"A buy-in of {request.BuyIn} is under ten big blinds. There would be nothing to play with.");
         }
+
+        // One chip to the unit, so the table's chip buy-in has to sit inside what the
+        // wallet will take. At these stakes that is roubles and nothing else -- the
+        // rest are simply not held in numbers like these, and giving each wallet a
+        // chips-per-unit rate is what would open them up.
+        var limits = WalletInfo.For(wallet);
+
+        if (request.BuyIn > limits.MaxBuyIn || request.BuyIn < limits.MinBuyIn)
+        {
+            return PokerResponse.Failed(
+                $"A {request.BuyIn:N0} chip buy-in cannot be paid in {limits.Label}, which takes "
+                + $"{limits.MinBuyIn:N0} to {limits.MaxBuyIn:N0}.");
+        }
+
+        // Validated before a chip is taken. Letting the table throw after the debit
+        // would pocket the buy-in and seat nobody.
+        if (!bank.TryDebit(sessionId, wallet, request.BuyIn, output))
+        {
+            return PokerResponse.Failed(
+                $"Not enough {limits.Label} -- you have {bank.GetBalance(sessionId, wallet):N0} "
+                + $"and the buy-in is {request.BuyIn:N0}.");
+        }
+
+        // Recorded the instant the money is gone. From here until the player stands
+        // up, this file is the only thing that knows they are owed anything.
+        escrow.Record(sessionId, wallet, request.BuyIn);
 
         var rules = new HoldemRules
         {
@@ -116,7 +156,10 @@ public class PokerService(
             Characters = characters,
             Agents = agents,
             BuyIn = request.BuyIn,
+            Wallet = wallet,
         });
+
+        await profiles.SaveAsync(sessionId);
 
         log.Info(
             $"seat taken [{sessionId}] -- {request.Seats} seats, blinds {rules.SmallBlind}/{rules.BigBlind}, "
@@ -127,7 +170,7 @@ public class PokerService(
             log.Detail($"  {character}");
         }
 
-        return Success(sessionId);
+        return Success(sessionId) with { Note = note };
     }
 
     public PokerResponse Deal(MongoId sessionId)
@@ -144,9 +187,14 @@ public class PokerService(
             return PokerResponse.Failed("A hand is already in progress.");
         }
 
-        // A busted seat is bought back in by somebody new, which is the difference
-        // between a table and a treadmill. The player's own seat is topped up too --
-        // free, while the chips are notional.
+        // A busted bot is replaced by somebody new, which is the difference between a
+        // table and a treadmill. The player is **not** topped up: their chips cost
+        // real currency, so a fresh stack is a fresh buy-in and has to be asked for.
+        if (session.Table.Player.Stack <= 0)
+        {
+            return PokerResponse.Failed("You are out of chips. Leave the table and buy in again.");
+        }
+
         Reseat(session);
 
         try
@@ -157,6 +205,8 @@ public class PokerService(
         {
             return PokerResponse.Failed(ex.Message);
         }
+
+        RecordStack(session, sessionId);
 
         return Success(sessionId);
     }
@@ -191,6 +241,8 @@ public class PokerService(
             return Success(sessionId) with { Ok = false, Error = ex.Message };
         }
 
+        RecordStack(session, sessionId);
+
         return Success(sessionId);
     }
 
@@ -199,12 +251,103 @@ public class PokerService(
             ? PokerResponse.Failed("You are not at a table.")
             : Success(sessionId);
 
-    public PokerResponse Leave(MongoId sessionId)
+    /// <summary>
+    /// Stands up and takes the chips. Whatever is in front of the player converts back
+    /// at one to the unit, however much or little that is.
+    /// </summary>
+    public async Task<PokerResponse> LeaveAsync(MongoId sessionId, ItemEventRouterResponse output)
     {
-        tables.Clear(sessionId);
-        log.Info($"left the table [{sessionId}]");
+        var session = tables.Get(sessionId);
 
-        return new PokerResponse();
+        if (session is null)
+        {
+            // Not at a table, but a stack may still be owed from a session that never
+            // finished -- which is exactly the case this has to handle.
+            var recovered = RefundAbandoned(sessionId, output);
+            await profiles.SaveAsync(sessionId);
+
+            return new PokerResponse { Note = recovered };
+        }
+
+        if (session.Table.Street is not (HoldemStreet.Idle or HoldemStreet.Showdown))
+        {
+            return PokerResponse.Failed("Finish the hand before you stand up.");
+        }
+
+        var chips = session.Table.Player.Stack;
+
+        if (chips > 0)
+        {
+            bank.Credit(sessionId, session.Wallet, chips, output);
+        }
+
+        // Released only after the credit. A crash between the two leaves the stack
+        // recorded and refundable, which is the safe way round -- the other order
+        // pays nothing and forgets it was owed.
+        escrow.Release(sessionId);
+        tables.Clear(sessionId);
+
+        await profiles.SaveAsync(sessionId);
+
+        var net = chips - session.BuyIn;
+        log.Info(
+            $"left the table [{sessionId}] with {chips:N0} {session.Wallet} "
+            + $"against a {session.BuyIn:N0} buy-in ({net:+#;-#;0})");
+
+        return new PokerResponse
+        {
+            Balance = bank.GetBalance(sessionId, session.Wallet),
+            Wallet = session.Wallet.ToString(),
+        };
+    }
+
+    /// <summary>
+    /// Writes the player's stack down after every hand.
+    ///
+    /// The stack is the only record of what they are owed and it changes every hand,
+    /// so anything less often is already wrong. This is the whole difference between
+    /// giving back what somebody has and giving back what they arrived with.
+    /// </summary>
+    private void RecordStack(PlayerSession session, MongoId sessionId) =>
+        escrow.Record(sessionId, session.Wallet, session.Table.Player.Stack);
+
+    /// <summary>
+    /// Gives back a stack whose table no longer exists.
+    ///
+    /// The table lives in memory and the buy-in does not, so a restart mid-session
+    /// leaves currency owed with nothing to play it on. Refunding lazily, on next
+    /// contact, avoids touching profiles at boot before the server has finished
+    /// loading them.
+    /// </summary>
+    private string? RefundAbandoned(MongoId sessionId, ItemEventRouterResponse output)
+    {
+        var owed = escrow.Get(sessionId);
+
+        if (owed is null)
+        {
+            return null;
+        }
+
+        // A live table still owns its stack. Only an orphan is refundable.
+        if (tables.Get(sessionId) is not null)
+        {
+            return null;
+        }
+
+        if (!Enum.TryParse<Wallet>(owed.Wallet, ignoreCase: true, out var wallet))
+        {
+            escrow.Release(sessionId);
+            return $"Discarded an unreadable outstanding stack of {owed.Chips} '{owed.Wallet}'.";
+        }
+
+        if (owed.Chips > 0)
+        {
+            bank.Credit(sessionId, wallet, owed.Chips, output);
+        }
+
+        escrow.Release(sessionId);
+
+        return $"Gave back {owed.Chips:N0} {wallet} from a session that never finished.";
     }
 
     private void Reseat(PlayerSession session)
@@ -213,8 +356,8 @@ public class PokerService(
         {
             if (seat.IsPlayer)
             {
-                session.Table.Reseat(seat.Index, session.BuyIn);
-                log.Info("you went broke and were topped back up -- the chips are not real yet.");
+                // Handled by the caller, which refuses to deal. Topping the player up
+                // here would create currency out of nothing.
                 continue;
             }
 
@@ -236,6 +379,8 @@ public class PokerService(
         {
             Table = session is null ? null : HoldemView.Of(session.Table),
             Characters = session?.Characters.Select(character => character.Name).ToList() ?? [],
+            Balance = session is null ? 0 : bank.GetBalance(sessionId, session.Wallet),
+            Wallet = (session?.Wallet ?? Wallet.Roubles).ToString(),
         };
     }
 }
