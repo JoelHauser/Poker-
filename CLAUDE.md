@@ -864,6 +864,53 @@ never saw the one the tab clones, which then went on animating a tab whose toggl
 longer drove it. Frozen instead -- `Instantiate` copied the template's current values
 and the template is picked unselected, so freezing keeps exactly the resting look.
 
+### The table was laid out against the picture, not the table in it
+
+Three faults, all visible in one screenshot: the community cards off the middle of the
+cloth, the seats either side sitting on the table, and the player's hand tangled up
+with the status line and the action buttons.
+
+- **The cloth is not centred in `table.png` and does not fill it.** It is 0.42 x 0.34
+  of the image and sits 2.1% above its middle. Everything placed at the centre of the
+  felt *rect* is therefore placed against the photograph rather than against the table
+  in it. `ClothHalfWidth` / `ClothHalfHeight` / `ClothRise` carry the measurement, and
+  the board, the pot and the seat ring are all positioned from it.
+
+  **Measure the cloth by hue, not by brightness.** The green is in shadow down its left
+  side, so a brightness test drops that edge and reports the cloth 3% right of where it
+  is -- a plausible-looking answer, in the wrong direction, that would have moved the
+  board further off centre. Testing for "greener than it is red or blue" finds the
+  shadowed edge and puts the cloth centre within a pixel of the image's.
+
+- **No single ellipse can seat this table.** The old ring was 0.52 x 0.74 of the felt
+  rect, which put the side seats 534 out with a 240-wide plaque on them -- an inner
+  edge at 414 against a cloth reaching 454, so they sat on the playing surface. Widen
+  the ring to clear it and the seats *above* the table leave the screen, because they
+  sit at 0.81 of the ring's height while the player sits at all of it. Both ends cannot
+  be satisfied by one pair of radii.
+
+  `SeatPosition` pushes each seat out along its own direction instead, until its box is
+  clear of the cloth in one axis or the other -- `min(clearX/|cos|, clearY/|sin|)`. A
+  seat to the side goes far enough sideways, one above goes far enough up, and neither
+  pays for the other. Checked at two, three, four and five seats: every seat clears the
+  cloth and stays inside the play area.
+
+- **A layout group measures a child's rect and ignores its `localScale`.** The same
+  fault as the menu pip, from the other direction. Cards are scaled rather than resized
+  -- `CardView` sizes its pips and corner blocks in absolute units, so a smaller rect
+  would not make a smaller card -- so every row was laid out at a full 96x138 per card
+  for cards drawn at 44% and 78%. A seat's two cards reserved 198 of width to draw 90;
+  the five on the board reserved 520 to draw 414. That is most of where the crowding
+  came from, and why the gaps between cards looked nothing like the spacing asked for:
+  the spacing was right and the slots either side of it were twice the size of their
+  contents. `CardSlot` wraps each card in a slot the size it is actually drawn at.
+
+**`StageRise` is a solved constraint, not a preference.** The seats above the table
+have to clear the cloth and stay under the title, and the player's seat below it has to
+clear the cloth and stay above the status line; together those leave it between about
+22 and 41, and it is 32. Move the title, the status line or the action strip and it has
+to be worked out again.
+
 ### Naming the bots
 
 `BotTable` is injectable and `Types["usec"].FirstNames` is the game's own PMC
@@ -1488,9 +1535,9 @@ In rough order of how likely it is to be wrong:
 
 **The client**
 
-- **The table layout is derived, not eyeballed.** Seats are placed on an ellipse at
-  0.52 x 0.74 of the felt; those radii and the plaque sizes are the numbers most
-  likely to need nudging once seen on a screen.
+- ~~**The table layout is derived, not eyeballed.**~~ It was eyeballed, and seen on a
+  screen it was wrong in three ways at once. Now derived -- see "The table was laid
+  out against the picture, not the table in it".
 - **The buy-in is hardcoded** in `PokerPanel.Sit` at five seats, 2,000,000, 20k
   blinds. `/poker/sit` takes all three, so a setup row is easy.
 - Side pots are settled correctly but are not drawn as separate pots.

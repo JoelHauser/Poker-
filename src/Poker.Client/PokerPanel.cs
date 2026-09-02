@@ -32,15 +32,56 @@ namespace Poker.Client
         private const float FeltWidth = 1080f;
         private const float FeltHeight = FeltWidth / TableAspect;
 
-        /// <summary>
-        /// The ellipse the seats are placed on. Wider than the felt so the plaques sit
-        /// on its rim, the way players sit at the edge of a table rather than on it.
-        /// </summary>
-        private const float SeatRadiusX = FeltWidth * 0.52f;
+        /// <summary>The board's cards, and the gap between them once they are that size.</summary>
+        private const float BoardCardScale = 0.78f;
 
-        private const float SeatRadiusY = FeltHeight * 0.74f;
+        private const float BoardCardGap = 10f;
+
+        /// <summary>
+        /// Where the cloth actually is inside the photograph, as fractions of the image.
+        ///
+        /// **The oval is not centred in table.png and does not fill it.** The cloth is
+        /// 0.42 x 0.34 of the image and sits 2.1% above its middle, so anything placed at
+        /// the centre of the felt *rect* -- the board, the pot, the ring the seats sit on
+        /// -- is placed against the picture rather than against the table in it.
+        ///
+        /// Measured by scanning the image for pixels greener than they are red or blue.
+        /// That test rather than a brightness one, because the cloth is in shadow down its
+        /// left side: a brightness test drops the shadowed edge and reports the cloth 3%
+        /// right of where it is, which is a plausible-looking answer and the wrong one.
+        /// </summary>
+        private const float ClothHalfWidth = 0.4207f;
+
+        private const float ClothHalfHeight = 0.3364f;
+
+        private const float ClothRise = 0.021f;
+
+        private static float ClothX => FeltWidth * ClothHalfWidth;
+
+        private static float ClothY => FeltHeight * ClothHalfHeight;
+
+        private static float ClothCentreY => FeltHeight * ClothRise;
 
         private const float SeatWidth = 240f;
+
+        private const float SeatHeight = 180f;
+
+        /// <summary>Taller: the player's cards are bigger and carry a hand reading.</summary>
+        private const float PlayerSeatHeight = 214f;
+
+        /// <summary>What a plaque keeps between itself and the cloth.</summary>
+        private const float SeatClearance = 12f;
+
+        /// <summary>
+        /// How far the felt sits above the middle of the screen.
+        ///
+        /// Not a taste: it is the one number that has to satisfy both ends at once. The
+        /// seats above the table have to clear the cloth and stay under the title, and the
+        /// player's seat below it has to clear the cloth and stay above the status line --
+        /// which together leave this between about 22 and 41. Move the title, the status
+        /// line or the action strip and this has to be worked out again.
+        /// </summary>
+        private const float StageRise = 32f;
 
         private static readonly Color Gold = new Color(0.72f, 0.62f, 0.34f, 1f);
         private static readonly Color Ink = new Color(0.88f, 0.86f, 0.80f, 1f);
@@ -475,8 +516,8 @@ namespace Poker.Client
             var holder = NewBox("Seat" + index, _seatLayer, Color.clear);
             holder.anchorMin = holder.anchorMax = new Vector2(0.5f, 0.5f);
             holder.pivot = new Vector2(0.5f, 0.5f);
-            holder.sizeDelta = new Vector2(SeatWidth, isPlayer ? 214f : 180f);
-            holder.anchoredPosition = SeatPosition(index, total);
+            holder.sizeDelta = new Vector2(SeatWidth, isPlayer ? PlayerSeatHeight : SeatHeight);
+            holder.anchoredPosition = SeatPosition(index, total, isPlayer);
 
             var column = holder.gameObject.AddComponent<VerticalLayoutGroup>();
             column.spacing = 5f;
@@ -509,6 +550,38 @@ namespace Poker.Client
         /// The seat's two cards. The player's are larger because they are the ones
         /// actually being read; everyone else's only need to be identifiable.
         /// </summary>
+        /// <summary>
+        /// One card, in a slot the size the card is actually drawn at.
+        ///
+        /// **A layout group measures a child's rect and ignores its localScale.** Every
+        /// card here is scaled rather than resized -- CardView sizes its pips and corner
+        /// blocks in absolute units, so a smaller rect would not make a smaller card --
+        /// and the rows were therefore laid out at full 96x138 for cards drawn at 44% and
+        /// 78%. A seat's two cards reserved 198 of width to draw 90, and the five on the
+        /// board reserved 520 to draw 414. That is where most of the table's crowding came
+        /// from, and the reason the gaps between cards looked nothing like the spacing
+        /// asked for: the spacing was right and the slots either side of it were twice the
+        /// size of what was in them.
+        ///
+        /// The slot carries the drawn size and the card keeps its scale, so the row is
+        /// measured on what it shows.
+        /// </summary>
+        private static GameObject CardSlot(RectTransform row, string code, float scale)
+        {
+            var slot = NewBox("Slot", row, Color.clear);
+            slot.sizeDelta = new Vector2(CardView.Width * scale, CardView.Height * scale);
+
+            var card = CardView.Build(slot, code, _font);
+
+            var rect = (RectTransform)card.transform;
+            rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = Vector2.zero;
+            rect.localScale = new Vector3(scale, scale, 1f);
+
+            return card;
+        }
+
         private static void BuildSeatCards(RectTransform holder, string[] cards, bool isPlayer, bool folded)
         {
             var scale = isPlayer ? 0.66f : 0.44f;
@@ -527,12 +600,11 @@ namespace Poker.Client
             for (var i = 0; i < 2; i++)
             {
                 var code = i < cards.Length ? cards[i] : null;
-                var card = CardView.Build(cardRow, code, _font);
 
                 // Scaled rather than resized, so CardView keeps its own proportions --
-                // including the drawn fallback it uses when the art is missing.
-                var rect = (RectTransform)card.transform;
-                rect.localScale = new Vector3(scale, scale, 1f);
+                // including the drawn fallback it uses when the art is missing. The slot
+                // is what the row is measured on; see CardSlot.
+                var card = CardSlot(cardRow, code, scale);
 
                 // A folded seat keeps its cards, dimmed, so the shape of the table
                 // stays readable instead of seats vanishing mid-hand.
@@ -617,25 +689,47 @@ namespace Poker.Client
         }
 
         /// <summary>
-        /// Where a seat sits on the ellipse.
+        /// Where a seat sits: out along its own direction until its plaque is clear of
+        /// the cloth.
         ///
         /// Seat 0 -- the player -- goes at the bottom and the rest run round from
         /// there, so the table reads the way one looks at it from a chair.
+        ///
+        /// **Pushed out until it clears, rather than placed on a fixed ellipse.** The
+        /// ellipse was 0.52 x 0.74 of the felt *rect*, which put the seats either side of
+        /// the table 534 out with a 240-wide plaque on them -- an inner edge at 414
+        /// against a cloth reaching 454, so they sat on the playing surface. An ellipse
+        /// wide enough to clear it sideways throws the seats above the table off the top
+        /// of the screen, because the ring is elliptical and those seats sit at 0.81 of
+        /// its height while the player sits at all of it. There is no single ellipse that
+        /// satisfies both.
+        ///
+        /// Solving it per seat does. The seat travels along its own direction until its
+        /// box is outside the cloth in one axis or the other, which is the smaller of the
+        /// two distances below -- so a seat to the side goes far enough sideways and one
+        /// above goes far enough up, and neither pays for the other. It holds at every
+        /// seat count rather than at the one the numbers were tuned against.
+        ///
+        /// Measured from the cloth's own centre, which is not the felt's -- see
+        /// <see cref="ClothRise"/>.
         /// </summary>
-        private static Vector2 SeatPosition(int index, int total)
+        private static Vector2 SeatPosition(int index, int total, bool isPlayer)
         {
-            if (total <= 1)
-            {
-                return new Vector2(0f, -SeatRadiusY);
-            }
-
-            // -90 degrees is the bottom of the circle in Unity's coordinates.
-            var degrees = -90f - (index * (360f / total));
+            var degrees = total <= 1 ? -90f : -90f - (index * (360f / total));
             var radians = degrees * Mathf.Deg2Rad;
 
-            return new Vector2(
-                Mathf.Cos(radians) * SeatRadiusX,
-                Mathf.Sin(radians) * SeatRadiusY);
+            var dx = Mathf.Cos(radians);
+            var dy = Mathf.Sin(radians);
+
+            var halfHeight = (isPlayer ? PlayerSeatHeight : SeatHeight) * 0.5f;
+            var clearX = ClothX + (SeatWidth * 0.5f) + SeatClearance;
+            var clearY = ClothY + halfHeight + SeatClearance;
+
+            var out_ = Mathf.Min(
+                Mathf.Abs(dx) > 0.001f ? clearX / Mathf.Abs(dx) : float.MaxValue,
+                Mathf.Abs(dy) > 0.001f ? clearY / Mathf.Abs(dy) : float.MaxValue);
+
+            return new Vector2(dx * out_, ClothCentreY + (dy * out_));
         }
 
         /// <summary>
@@ -816,9 +910,7 @@ namespace Poker.Client
             for (var i = 0; i < 5; i++)
             {
                 var dealt = codes != null && i < codes.Length;
-                var card = CardView.Build(_board, dealt ? codes[i] : null, _font);
-
-                ((RectTransform)card.transform).localScale = new Vector3(0.78f, 0.78f, 1f);
+                var card = CardSlot(_board, dealt ? codes[i] : null, BoardCardScale);
 
                 // An undealt slot is left as a ghost rather than a card back. A back
                 // means a card exists and is hidden, which on the board never happens.
@@ -883,7 +975,7 @@ namespace Poker.Client
             stage.anchorMin = stage.anchorMax = new Vector2(0.5f, 0.5f);
             stage.pivot = new Vector2(0.5f, 0.5f);
             stage.sizeDelta = new Vector2(FeltWidth, FeltHeight);
-            stage.anchoredPosition = new Vector2(0f, 54f);
+            stage.anchoredPosition = new Vector2(0f, StageRise);
 
             BuildTable(stage);
 
@@ -924,14 +1016,18 @@ namespace Poker.Client
                     "[Poker] no table.png beside the plugin; falling back to flat cloth.");
             }
 
+            // On the cloth's centre, not the picture's. The board sits a little above it
+            // and the pot below, which is where a dealer puts them.
             _board = NewBox("Board", felt, Color.clear);
             _board.anchorMin = _board.anchorMax = new Vector2(0.5f, 0.5f);
             _board.pivot = new Vector2(0.5f, 0.5f);
-            _board.sizeDelta = new Vector2((5f * CardView.Width * 0.78f) + (4f * 10f), CardView.Height * 0.78f);
-            _board.anchoredPosition = new Vector2(0f, 24f);
+            _board.sizeDelta = new Vector2(
+                (5f * CardView.Width * BoardCardScale) + (4f * BoardCardGap),
+                CardView.Height * BoardCardScale);
+            _board.anchoredPosition = new Vector2(0f, ClothCentreY + 34f);
 
             var row = _board.gameObject.AddComponent<HorizontalLayoutGroup>();
-            row.spacing = 10f;
+            row.spacing = BoardCardGap;
             row.childAlignment = TextAnchor.MiddleCenter;
             row.childForceExpandWidth = false;
             row.childForceExpandHeight = false;
@@ -944,7 +1040,7 @@ namespace Poker.Client
             // Tall enough for the chips and the number beneath them, and dropped a
             // little so the extra height does not reach back up towards the board.
             _potHolder.sizeDelta = new Vector2(460f, 92f);
-            _potHolder.anchoredPosition = new Vector2(0f, -86f);
+            _potHolder.anchoredPosition = new Vector2(0f, ClothCentreY - 80f);
 
             var potRow = _potHolder.gameObject.AddComponent<HorizontalLayoutGroup>();
             potRow.childAlignment = TextAnchor.MiddleCenter;

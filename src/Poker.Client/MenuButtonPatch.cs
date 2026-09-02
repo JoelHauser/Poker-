@@ -150,6 +150,7 @@ namespace Poker.Client
             MenuIcon.Draw(button);
             button.Interactable = true;
             Wire(button);
+            Watch(button);
             Follow(button, template, screen);
 
             PokerClientPlugin.Log.LogInfo($"[Poker] menu button added, cloned from '{template.name}'");
@@ -199,6 +200,58 @@ namespace Poker.Client
 
             onClick.RemoveAllListeners();
             onClick.AddListener(OnClicked);
+        }
+
+        /// <summary>Whether the button's icons have been measured into the log, once.</summary>
+        private static bool _measured;
+
+        /// <summary>
+        /// Logs the button's icons the first time the pointer is over it.
+        ///
+        /// **Hover is the only moment worth measuring.** A `DefaultUIButton` keeps two of
+        /// them -- `_iconImage` and `_iconIdleImage` -- and swaps them in
+        /// `PointerEnterHandler`, so at install time the one that goes wrong is hidden and
+        /// has never been through a layout pass. Measuring at install measures the wrong
+        /// icon and reports everything as fine.
+        ///
+        /// `OnMouseOver` is a public UnityEvent field on the button, which is a cheaper
+        /// hook than an EventTrigger and does not compete with the pointer handling the
+        /// button already does. It logs once and then stays quiet.
+        /// </summary>
+        private static void Watch(DefaultUIButton button)
+        {
+            if (AccessTools.Field(typeof(DefaultUIButton), "OnMouseOver")?.GetValue(button)
+                is not UnityEvent over)
+            {
+                return;
+            }
+
+            over.RemoveAllListeners();
+            over.AddListener(() =>
+            {
+                if (_measured)
+                {
+                    return;
+                }
+
+                _measured = true;
+
+                foreach (var icon in button.GetComponentsInChildren<Image>(true))
+                {
+                    if (icon == null || icon.name.IndexOf("icon", StringComparison.OrdinalIgnoreCase) < 0)
+                    {
+                        continue;
+                    }
+
+                    var rect = icon.rectTransform;
+                    PokerClientPlugin.Log.LogInfo(
+                        $"[Poker] hovered icon '{icon.name}' {rect.rect.size} " +
+                        $"scale {rect.lossyScale} {icon.type}" +
+                        $"{(icon.preserveAspect ? " aspect" : string.Empty)}" +
+                        $"{(icon.gameObject.activeInHierarchy ? string.Empty : " off")} " +
+                        $"sprite {(icon.sprite != null ? icon.sprite.rect.size.ToString() : "none")}");
+                }
+            });
         }
 
         /// <summary>
