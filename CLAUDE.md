@@ -105,10 +105,11 @@ means the gate, not a bug in the game code.
 | `src/Poker.Game` | Rules engine. No SPT reference, no I/O, no clock. |
 | `tests/Poker.Game.Tests` | 189 tests. The evaluator, pot builder, log, hold'em table and bots are live; the paytables, UTH table and strategy are parked. |
 | `src/Poker.Server` | The mod: routes, DI, logging, wallet reading. **Moves no money yet.** |
+| `src/Poker.Client` | The BepInEx half: menu button, table panel, card and chip art. `net472`, built against the install. |
 | `tools/Poker.Console` | Terminal table and soak harness. No SPT needed. See "The harness". |
 | `scripts/` | `pack-mod.ps1` builds the droppable zip, `pack-console.ps1` the harness, `smoke.ps1` drives a real server. |
 
-Still to come, mirroring Blackjack: `src/Poker.Client`, `tests/Poker.Server.Tests`.
+Still to come, mirroring Blackjack: `tests/Poker.Server.Tests`.
 
 The engine knows nothing about currency -- it takes an `int` and returns an `int`.
 Everything that maps a `Wallet` to an item template belongs in `Wallets.cs` and
@@ -512,12 +513,13 @@ who they were when they sat down.
 The table is meant to feel alive and the seats are meant to read as players rather
 than as a lookup table with names on it.
 
-**The honest constraint first**, because it shapes every answer below: in UTH the
-seat-mates cannot take the player's money. There is no pot -- every seat plays its
-own hand against the dealer. So they can never be made to feel real by being
-*dangerous*. They are made to feel real by having a life of their own that the
-player watches happen: their own money, their own runs of luck, their own mistakes,
-and their own reactions to all three.
+**This section was written for UTH and its central constraint no longer holds.**
+There it argued the seat-mates could never feel *dangerous*, because a house-banked
+game has no pot and no seat can take the player's money. Hold'em has both. Being
+dangerous is now the strongest thing they have, and everything below is what is
+still needed on top of it: a life of their own that the player watches happen --
+their own money, their own runs of luck, their own mistakes, and their own
+reactions to all three.
 
 What that needs, roughly in order of how much it buys:
 
@@ -527,7 +529,7 @@ What that needs, roughly in order of how much it buys:
 2. **A bankroll with consequences.** Each seat has notional chips that rise and
    fall, and a seat that busts **leaves and is replaced**. A player who can go broke
    is the single strongest signal that a seat is a person, and it costs almost
-   nothing -- `Seat.Net` already produces the number.
+   nothing -- `HoldemSeat.Net` already produces the number.
 3. **Mood that moves.** Dials that drift during a session rather than sitting where
    they were set: a seat that has lost four in a row chases, a seat that just won
    big gets careless. A fixed personality is still a lookup table, just a biased
@@ -544,10 +546,10 @@ What that needs, roughly in order of how much it buys:
 6. **Visible mistakes.** The dials already produce them and the log already records
    them; surfacing one as a tell is nearly free.
 
-**Known flaw blocking this: the table takes one `ISeatAgent` for every seat**, so
-today all four seat-mates are the same person with different labels. Distinct
-characters need an agent per seat -- a list, or a factory keyed on the seat. Fix
-that before building anything above it.
+**Done.** `HoldemTable` takes one `IPokerAgent` per seat and keeps them in a
+dictionary keyed on the seat index, so every seat-mate is its own character.
+`ISeatAgent` survives only in the parked UTH files. The seats are also named from
+the game's own PMC list now -- see "Naming the bots".
 
 None of this belongs in the client. The engine owns behaviour and emits events; the
 client owns rendering and animation. A bot whose personality lives in the UI cannot
@@ -631,9 +633,9 @@ game on it is not the box this gets built on, and it needs no .NET installed.
 The zip is gitignored -- thirty megabytes that rebuild in seconds. The mod zip, when
 there is one, is small and gets tracked the way Blackjack's is.
 
-**This is not the SPT mod.** There is no server project and no client plugin, so
-there is nothing to drop into `user/mods/`. Testing inside Tarkov needs the whole
-server and client half of this file first.
+**This is not the SPT mod.** The console is the engine in a terminal. The mod
+itself is `src/Poker.Server` plus `src/Poker.Client`, and both are built and
+working -- see "Shipping it to an install".
 
 ### It found something on the first hand it drew
 
@@ -661,27 +663,109 @@ assemblies and `config.json` -- SPT provides its own, and a second copy of those
 one process is a load conflict waiting to happen.
 
 **What v0.1.0 is.** It loads, announces itself, registers six static routes, reads
-wallet balances, and plays real no-limit hold'em against the bots over HTTP. It is
-genuinely droppable and genuinely testable.
+wallet balances, and plays real no-limit hold'em against the bots -- over HTTP and
+from a table inside the game. **Confirmed on a real 4.1.3 install**, not inferred:
+the version gate passes, DI resolves, the routes register, the session resolves and
+the wallets read.
 
-**What it is not.** There is no client plugin, so there is nothing to look at in
-Tarkov -- the whole thing is driven by `smoke.ps1` or curl. And **it moves no
-money**: the chips are notional, sitting down costs nothing and cashing out pays
-nothing. That is a deliberate stopping point rather than an oversight. A mod that
-cannot move money cannot lose any, so the parts that load, route and play get
-proven against a real profile before the money path -- the part that cost
-Blackjack the most -- is written.
+**What it is not.** It **moves no money**: the chips are notional, sitting down
+costs nothing and cashing out pays nothing. That is a deliberate stopping point
+rather than an oversight. A mod that cannot move money cannot lose any, so the
+parts that load, route and play get proven against a real profile before the money
+path -- the part that cost Blackjack the most -- is written.
 
 The startup banner says so out loud, because the alternative is somebody watching
 a stash that never changes and concluding the mod is broken.
 
-### The client plugin cannot be built here
+### The client plugin
 
-It has to compile against `Assembly-CSharp.dll` and the `spt-*` DLLs of the
-install it will run on: 4.1.3's `PluginValidator` reads a plugin's `spt-*`
-references and requires a major.minor match. It also targets `net472`, not .NET
-10, because it runs in the game's mono runtime. That work happens on the machine
-with the game on it.
+`src/Poker.Client`, and it can only be built on a machine with the game on it: it
+compiles against `Assembly-CSharp.dll` and the `spt-*` DLLs of the install it will
+run on, because 4.1.3's `PluginValidator` reads a plugin's `spt-*` references and
+requires a major.minor match. It targets `net472`, not .NET 10, because it runs in
+the game's mono runtime.
+
+    dotnet build src/Poker.Client/Poker.Client.csproj -c Release \
+      -p:SPTPath="H:\SPT4.1.X" -p:DeployToSPT=true
+
+Deploys to `BepInEx\plugins\Poker\` with the art beside it. Verify the gate by
+reading the built DLL's `spt-*` references with Mono.Cecil and checking major.minor
+against `BepInEx\plugins\spt\`; that is the whole of what the validator does.
+
+**What ported from Blackjack unchanged** -- `Textures`, `CardView`,
+`MenuButtonPatch`, and all 52 card faces plus the table photograph. `Card.Code` is
+deliberately identical between the two mods, which is what makes the art carry over
+untouched.
+
+**What is new here** -- `PokerClientPlugin`, `PokerApi` (all six routes, request
+shapes matched against `Contracts.cs`), `ChipView`, and `PokerPanel`.
+
+**`ProfileSync` is deliberately not ported.** It sends an item event the server has
+no handler for yet, so it could only fail. It arrives with the money path.
+
+**The panel decides nothing.** The action strip is built from the server's own
+`Options.Moves` rather than from the client's idea of the rules, and is rebuilt on
+every view -- a stale button that is still clickable is a move the player did not
+mean to make. A refused move comes back with the real view attached, so the client
+redraws rather than arguing.
+
+**The reveal rule is the server's.** Draw `Cards` exactly as sent; an empty list
+means backs. `HoldemView.Of` keys it off the seat having reached a showdown.
+
+### Two things the menu will do to you
+
+- **The button walks down the screen.** `MenuButtonPatch` installs on both `Awake`
+  and `Show`, and placement measured against the lowest button while excluding only
+  *our own*. With a second mod doing the same thing the two leapfrog -- we drop
+  below them, they drop below us -- a row per cycle, until both are far off the
+  bottom. With one such mod installed it never shows, because a mod's own button is
+  excluded from its own measurement and the lowest row stays the exit group forever.
+  Poker now measures once per menu and remembers. **Blackjack still has this bug**
+  and will still creep, though it settles now that we hold still.
+- **Read `BepInEx\LogOutput.log` before guessing.** Two "menu button added" lines
+  is how the leapfrog was found. `[Poker] client loaded` confirms the plugin
+  started; its absence points at the validator.
+
+### Naming the bots
+
+`BotTable` is injectable and `Types["usec"].FirstNames` is the game's own PMC
+nickname list -- 619 of them, the names a player meets in raids. `BotNames` reads
+it once, filters to ASCII names of 16 characters or fewer, and hands distinct ones
+to each table.
+
+The filter is not fussiness: the panel borrows whatever font the menu happens to
+have loaded, and a name that renders as boxes is worse than a numbered seat. The
+scav lists are Cyrillic throughout and a few PMC entries are too.
+
+It goes through `INameSource` for the same reason the money goes through `IBank`.
+The engine *takes* names rather than inventing them -- it has no business knowing
+where a good name comes from -- and numbers any seat it is not given one for.
+
+## The chips, and the stakes that follow from them
+
+Six denominations, drawn from an image cut into one file per chip: **10k, 25k,
+50k, 100k, 500k, 1M**. `ChipView` holds the value beside the file name, so the
+artwork and the arithmetic cannot drift apart.
+
+**The stakes are set by the chips, not the other way round.** The smallest chip is
+10,000, so that is the small blind: blinds are **10k / 20k** and the buy-in
+**2,000,000**, the hundred big blinds a cash game usually starts at. Every stake is
+a whole number of the smallest chip, because a blind that cannot be built out of
+chips is one the table can never show honestly. The first stakes were 25 / 50 with
+a 5,000 buy-in, at which no chip could ever have appeared on the felt.
+
+**Greedy breakdown is wrong for this set, and looks right until it is not.**
+10,000 does not divide 25,000. The pre-flop pot at these blinds is exactly 30,000,
+which is three 10k chips -- and a greedy pass renders it as one 25k chip with 5,000
+stranded, so the very first thing anyone sees is wrong. `ChipView.Breakdown`
+searches for the fewest chips that make the amount exactly, in units of the 5,000
+the denominations share, and reports anything genuinely unrepresentable as a
+remainder rather than rounding it away.
+
+**The wallet ceilings do not yet agree with this.** `Wallets.cs` caps a rouble
+buy-in at 500,000, well under the 2,000,000 chip buy-in. Harmless while the chips
+are notional, and it is exactly the "chip denomination" open item: either a chip is
+not a rouble, or that ceiling rises. Settle it with the money path.
 
 ## Things that will bite you
 
@@ -738,7 +822,25 @@ all of them still apply to this mod.
   major.minor match. It targets `net472`, not .NET 10, because it runs inside the
   game's mono runtime.
 - **Bash heredocs mangle backslashes**, and a long one containing quotes will fail
-  to parse outright. Use the Write tool for C# and for any large file.
+  to parse outright. Use the Write tool for C# and for any large file. This is not
+  theoretical: rewriting the panel by heredoc failed to parse on the quotes, having
+  already been warned about here.
+- **The .NET 10 SDK on Joel's box is a user-local install** at
+  `%USERPROFILE%\.dotnet` (10.0.400) and is **not on PATH**. A bare `dotnet` finds
+  `C:\Program Files\dotnet`, which has only SDK 8, and fails with `NETSDK1045: The
+  current .NET SDK does not support targeting .NET 10.0`. Build with
+  `& "$env:USERPROFILE\.dotnet\dotnet.exe"`. The .NET 10 *runtime* is in Program
+  Files, so the server runs fine -- only builds break.
+- **The server lives in `SPT_Runtime\`, not at the install root.** Joining
+  `user/mods` onto the install path creates a folder nothing ever reads, and a mod
+  that never loads looks exactly like a mod that loaded and did nothing.
+  `pack-mod.ps1 -InstallPath` did this and now finds the runtime or refuses. An
+  unrelated mod, IncreaseClimbHeight, had been sitting unloaded in that dead folder
+  since August for the same reason.
+- **Stake defaults live in five places and must agree**: `HoldemRules`,
+  `SitRequest`, the console's `Args`, `PokerPanel.Sit`, and `scripts/smoke.ps1`.
+  The harness carrying its own copy made a retune look as though it had not taken
+  effect -- the change was fine, the harness was overriding it.
 - **Zip entries must be written by hand with forward slashes.** `Compress-Archive`
   writes backslash entry names, which extract on Linux as one file literally called
   `SPT_Runtime\user\mods\Poker\config.json`. An earlier version of this note said to
@@ -801,13 +903,13 @@ Source lives at `github.com/sp-tarkov/server-csharp` under
 
 ### The test profiles on Joel's box
 
-Profile `6a8cd3a7e0b8272790f41285` ("test", level 69) is the sandbox -- roughly
-499M roubles, 500M dollars, 500M euros, 5,000 GP coins. The other profile,
+Profile `6a8cd3a7e0b8272790f41285` ("test", level 69) is the sandbox. Read off it
+on 1 Sep 2026: 24.9M roubles, 110M dollars, 1.02B euros. The other profile,
 `6a7501c247d2e12a3892aaee` ("SCOOP", level 16), is the real one; leave it alone.
 
-**Bitcoin and Lega medals are both at zero there**, so the two wallets with a
-`StackMaxSize` of 1 -- the riskiest payout path -- cannot be exercised by betting
-until some are added.
+**GP coins, bitcoin and Lega medals are all three at zero there.** That includes
+both wallets with a `StackMaxSize` of 1 -- the riskiest payout path -- so none of
+the three can be exercised by betting until some are added.
 
 ## Wallets, as verified on a real 4.1.3 install
 
@@ -825,7 +927,7 @@ The 4.1.3 namespaces, which are not what older docs say:
 `Helpers.Items.ItemHelper`, `Services.Commerce.MailSendService`,
 `Servers.SaveServer`, `Common.Models.Logging.ISptLogger<T>`.
 
-## Architecture, once the server exists
+## Architecture
 
 Server-authoritative. The client renders what it is handed and sends intents; it
 never sees a hidden card, never draws, never decides an outcome. Mirror Blackjack:
@@ -867,8 +969,11 @@ These were settled there against the real client and apply unchanged.
 - **No hotkey.** A key would be reachable from anywhere, including a raid.
 - **Valuables are staked through EFT's own grid component**, dragged into a
   container. One item type per bet: a mixed stake has no coherent payout.
-- **Per-hand settlement, straight to the stash.** No session, no chips, no buy-in.
-  Mail only when the stash cannot take the winnings.
+- ~~**Per-hand settlement, straight to the stash.** No session, no chips, no
+  buy-in.~~ **This one did not survive the variant change.** Hold'em cannot settle
+  per hand -- a stack is what a bet is sized against and what decides side-pot
+  eligibility -- so the player buys in and cashes out. See "Where the money comes
+  from". Mail when the stash cannot take the winnings still stands.
 - **Settings a player might want to change live in the F12 BepInEx menu**, not in a
   server config file that needs a restart. It is single player; the person sending
   the request owns the server it is sent to.
@@ -935,44 +1040,33 @@ Blackjack ships as `com.mybutthasarash.blackjack` on the same rule.
 
 ## Current state
 
-**Update this section as work completes.**
+**Update this section as work completes.** The last session found this section
+claiming the server did not exist, four commits after it shipped -- a fresh session
+reads this first and would have started building one.
 
-- Working branch **`uth`** (named before the variant changed), off `main` at
-  `9c4b9e9`. Pushed to `origin/uth`.
-- `Poker.Game` green at **189 tests** in about 8 seconds, mutation-checked
-  throughout.
+- Working branch **`uth`** (named before the variant changed), off `main`.
+- `Poker.Game` green at **189 tests** in about 7 seconds, mutation-checked
+  throughout. Every test builds its own `HoldemRules`, so the stakes can be retuned
+  without touching the suite.
 - **The variant is no-limit Texas Hold'em against bots**, decided after two
   reversals. See the top of this file, and read it before reopening the question.
-- **The game is playable, and there is a mod you can drop into an install.**
-  `dotnet run --project tools/Poker.Console` deals a table in a terminal;
-  `./scripts/pack-mod.ps1` produces `releases/Poker-0.1.0-SPT4.1.zip`, which loads
-  into SPT 4.1.3 and serves six routes.
+- **The mod is installed and works in the game.** Server and client both build and
+  are deployed to `H:\SPT4.1.X`. There is a POKER button on the main menu, and the
+  table deals, plays and settles from inside Tarkov.
+- **Verified on the real install rather than inferred**: the version gate passes,
+  the six routes register, the session resolves, the wallets read, and hands play
+  through all four streets with re-raises, folds, side stacks and all-ins. Folded
+  seats stay face down at showdown.
+- **The bots have names** from the game's own PMC list -- Badaimnet, Nick,
+  CEOofHeadEyes -- and one agent per seat, so they are genuinely different people.
+- **The chips are real art with real denominations**, and the stakes were retuned
+  to fit them: blinds 10k / 20k, buy-in 2,000,000.
 - **The mod moves no money.** Chips are notional, so it is safe to point at a real
   profile. See "Shipping it to an install".
-- **There is no client plugin**, so nothing is visible in Tarkov yet. It has to be
-  built on the machine with the game on it.
 - A complete UTH game is in the tree and **parked**. It is green and does no harm;
   nothing new should call into it.
-- Nothing SPT-facing exists yet -- no server project, no client plugin, no routes.
 
 ### Open items
-
-**The game**
-
-- **Give the bots a life the player can see.** Mood and memory are in; what is
-  missing is everything visible: names and faces that persist, notional stacks that
-  can bust and be replaced, engine-emitted reactions, and thinking time taken from
-  how close the decision was. See "They have to feel like real people".
-- **A chip denomination**, so a buy-in in roubles becomes a whole number of chips.
-  Rounding at that boundary is where money goes missing.
-- **Decide the re-seating policy for the mod.** `HoldemTable.Reseat` exists and the
-  console tops everybody up, but a cash game, a tournament and "a stranger sits down"
-  are three different answers and only the engine mechanism is built.
-- **Then the dynamism** under "They have to feel like real people": persistence
-  between hands, notional stacks that can bust and be replaced, mood that drifts,
-  engine-emitted reactions, and thinking time drawn from how close the decision was.
-- Decide UTH's fate -- delete, ship as a second table, or leave parked. Undecided on
-  purpose; it costs nothing where it is.
 
 **The money -- the next real piece of work**
 
@@ -982,17 +1076,41 @@ Blackjack ships as `com.mybutthasarash.blackjack` on the same rule.
   to do. `EscrowStore` must hold the player's **current stack**, updated as it
   changes, not the amount they sat down with -- a crash mid-session has to return
   what they actually have.
+- **Reconcile the chip buy-in with the wallet ceilings.** 2,000,000 chips against a
+  500,000 rouble cap: either a chip is not a rouble, or the ceiling rises. See "The
+  chips, and the stakes that follow from them".
 - **Set the wallet ceilings from the buy-in**, not from a paytable. The most a
   session can return is roughly `buy-in x seats`; bitcoin and Lega medals, which do
-  not stack, are the binding constraint.
-- Port `Bank`, `ProfileGateway`, `EscrowStore`, `StatsStore`, `BlackjackLog` and
-  `Fakes` from Blackjack largely as-is; they are currency plumbing and carry no
-  blackjack rules.
+  not stack, are the binding constraint -- and all three valuable wallets are at
+  zero on the test profile, so none can be exercised by betting yet.
+- Port `Bank`, `ProfileGateway`, `EscrowStore`, `StatsStore` and `Fakes` from
+  Blackjack largely as-is; they are currency plumbing and carry no blackjack rules.
+- Port `MoneyInvariantTests` **before** writing settlement, not after.
+- Port `ProfileSync` and add the item-event transport with it, or money will move
+  in the profile while the stash on screen stays stale.
 
 **The client**
 
-- Port `CardView` / `Textures` / `MenuButtonPatch` from `Blackjack.Client`.
-- The wire enums are strings already, with property-level attributes. Keep it that
-  way when the server's own contracts are written.
-- `tools/Poker.Console` is built. Use `--soak` before trusting any change to the
-  betting round, and `--seed` to get a bad hand back.
+- **The table layout is derived, not eyeballed.** Seats are placed on an ellipse at
+  0.52 x 0.74 of the felt; those radii and the plaque sizes are the numbers most
+  likely to need nudging once seen on a screen.
+- **The buy-in is hardcoded** in `PokerPanel.Sit` at five seats, 2,000,000, 20k
+  blinds. `/poker/sit` takes all three, so a setup row is easy.
+- Side pots are settled correctly but are not drawn as separate pots.
+
+**The game**
+
+- **Give the bots a life the player can see.** Mood and memory are in, and so are
+  names and one agent per seat. Still missing: notional stacks that can bust and be
+  replaced, engine-emitted reactions, and thinking time taken from how close the
+  decision was. See "They have to feel like real people".
+- **Decide the re-seating policy for the mod.** `HoldemTable.Reseat` exists and the
+  console tops everybody up, but a cash game, a tournament and "a stranger sits
+  down" are three different answers and only the engine mechanism is built.
+- Decide UTH's fate -- delete, ship as a second table, or leave parked. Undecided
+  on purpose; it costs nothing where it is.
+
+**Outside this repo**
+
+- **Blackjack's menu button still leapfrogs.** The same five-line fix applies; see
+  "Two things the menu will do to you".
