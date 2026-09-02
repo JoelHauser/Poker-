@@ -1287,10 +1287,12 @@ reads this first and would have started building one.
   not only from the main menu. Both of Blackjack's inter-mod rules are obeyed, so the
   two tabs can sit beside each other. **Not yet seen on a screen** -- see "The task-bar
   tab".
-- **Both halves are installed at `C:\HUH` and the server loads them.** Version gate
-  passes, all six routes register, the banner prints, no errors. That is the whole of
-  what a headless server can confirm: **nothing in the client has been rendered and no
-  money has moved.**
+- **Both halves are installed at `C:\HUH`, the server loads them, and `-PingOnly`
+  passes.** Version gate, six routes, banner, session resolved, profile found, all six
+  wallets read, no errors. That is the whole of what a headless server can confirm:
+  **nothing in the client has been rendered and no money has moved.** The profile
+  there is a launcher stub with no PMC, so the buy-in cannot be smoked until the game
+  is launched once -- see "Open items".
 - A complete UTH game is in the tree and **parked**. It is green and does no harm;
   nothing new should call into it.
 
@@ -1305,9 +1307,20 @@ reads this first and would have started building one.
   bug. What is left is to **see them**: the pot column, the close fade, the buy-in
   confirmation and the task-bar tab have all been compiled and none has been
   rendered. A compiler cannot tell you a tab landed beside SETTINGS.
-- **No profile exists on the work box**, so `smoke.ps1` has no session id to use and
-  the ping route cannot be exercised there. Registering one through the launcher API
-  would fix that without starting the game.
+- ~~**No profile exists on the work box.**~~ One was registered, and **`-PingOnly`
+  passes there**: route reachable, session resolved, profile found, all six wallets
+  read, stack limits reported on first contact, no errors either side. The HTTPS,
+  compression and cookie handling in `smoke.ps1` all work as ported.
+- **A registered profile is not a character, and the money path needs a character.**
+  The launcher writes a **369-byte stub** -- `characters.pmc` has no `Info` and no
+  real inventory, because the PMC is created when the game is first launched and a
+  side is chosen. So every wallet reads 0, there is no stash container to credit
+  into, and **the buy-in cannot be exercised without launching the game once.** That
+  is the actual blocker on smoking the money, not the profile.
+
+  Worth noting what it *did* prove: `Bank`'s stack walk ran against a profile with
+  essentially no inventory and returned zero rather than throwing, which is the
+  "state routes are called before anything exists" hazard passing on the money path.
 - **Give each wallet a chips-per-unit rate.** One chip to one unit means only roubles
   can buy into a 2,000,000 chip table -- dollars, euros and the valuables are refused
   by name, and their ceilings in `Wallets.cs` are still sized for a game they cannot
