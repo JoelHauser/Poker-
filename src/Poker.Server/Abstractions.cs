@@ -32,3 +32,20 @@ public interface IProfileGateway
 {
     bool HasProfile(MongoId sessionId);
 }
+
+/// <summary>
+/// Where the bots' names come from.
+///
+/// A seam for the same reason <see cref="IBank"/> is one: the real implementation
+/// reads the game's own PMC nickname list out of the database, and a test wanting a
+/// named table should not have to stand a database up to get one.
+/// </summary>
+public interface INameSource
+{
+    /// <summary>
+    /// Distinct names for one table, in seat order. Fewer than asked for is allowed
+    /// -- the table falls back to numbering whatever it does not receive -- so a
+    /// missing or unreadable name list costs the flavour and nothing else.
+    /// </summary>
+    IReadOnlyList<string> Take(int count, Random rng);
+}

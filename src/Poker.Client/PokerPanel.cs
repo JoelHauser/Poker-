@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using Newtonsoft.Json.Linq;
 using TMPro;
@@ -17,35 +16,43 @@ namespace Poker.Client
     /// works out who won, and never knows a card the server did not send. When the
     /// engine refuses a move it answers with the real view attached, so the fix for a
     /// client that has drifted is simply to draw what came back.
-    ///
-    /// Laid out as rows rather than as seats around an oval. That is a deliberate
-    /// first pass: the data path is worth proving before a thousand lines of layout
-    /// are built on top of it, and every number here is one the finished table needs
-    /// anyway.
     /// </summary>
     internal static class PokerPanel
     {
         private const string RootName = "PokerTableCanvas";
 
         /// <summary>
-        /// The table photograph, taken from Blackjack. It is an oval on a rectangular
-        /// image, and 1.655 is that image's aspect -- keeping it stops the cloth
-        /// stretching into a shape no table has.
+        /// The table photograph is an oval on a rectangular image, and 1.655 is that
+        /// image's aspect -- keeping it stops the cloth stretching into a shape no
+        /// table has.
         /// </summary>
         private const float TableAspect = 1.655f;
 
-        private static readonly Color Gold = new Color(0.55f, 0.47f, 0.25f, 1f);
+        private const float FeltWidth = 1080f;
+        private const float FeltHeight = FeltWidth / TableAspect;
+
+        /// <summary>
+        /// The ellipse the seats are placed on. Wider than the felt so the plaques sit
+        /// on its rim, the way players sit at the edge of a table rather than on it.
+        /// </summary>
+        private const float SeatRadiusX = FeltWidth * 0.52f;
+
+        private const float SeatRadiusY = FeltHeight * 0.74f;
+
+        private const float SeatWidth = 240f;
+
+        private static readonly Color Gold = new Color(0.72f, 0.62f, 0.34f, 1f);
         private static readonly Color Ink = new Color(0.88f, 0.86f, 0.80f, 1f);
-        private static readonly Color Dim = new Color(0.55f, 0.54f, 0.50f, 1f);
+        private static readonly Color Dim = new Color(0.50f, 0.49f, 0.46f, 1f);
 
         private static GameObject _root;
         private static TMP_FontAsset _font;
 
         private static RectTransform _board;
-        private static RectTransform _seatColumn;
+        private static RectTransform _potHolder;
+        private static RectTransform _seatLayer;
         private static RectTransform _actionRow;
         private static TextMeshProUGUI _status;
-        private static RectTransform _potHolder;
 
         // What the player is asking to raise to. Held between redraws because the
         // whole action strip is rebuilt whenever the view changes.
@@ -175,6 +182,7 @@ namespace Poker.Client
                 return;
             }
 
+            _raiseTo = 0;
             Render(reply);
         }
 
@@ -192,6 +200,8 @@ namespace Poker.Client
             // back the real view with the reason attached. Draw the view either way:
             // a client whose picture has drifted is exactly the case this covers.
             var error = ErrorOf(reply);
+
+            _raiseTo = 0;
             Render(reply, keepStatus: error != null);
 
             if (error != null)
@@ -211,9 +221,8 @@ namespace Poker.Client
             SetPot(null);
 
             SetStatus(
-                "Not at a table.\n\n"
-                + "Five seats, 2,000,000 in chips, blinds 10k / 20k.\n"
-                + "The chips are notional in this build -- nothing is at stake.");
+                "Five seats, 2,000,000 in chips, blinds 10k / 20k."
+                + "     The chips are notional in this build -- nothing is at stake.");
 
             BuildActions(new[]
             {
@@ -257,28 +266,32 @@ namespace Poker.Client
         /// </summary>
         private static string Headline(string street, JObject table)
         {
+            if (string.Equals(street, "Idle", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Waiting to deal.";
+            }
+
             if (!string.Equals(street, "Showdown", StringComparison.OrdinalIgnoreCase))
             {
-                return string.Equals(street, "Idle", StringComparison.OrdinalIgnoreCase)
-                    ? "Waiting to deal."
-                    : street;
+                return street;
             }
 
             var winners = (table["Seats"] as JArray)?
                 .Where(s => ((int?)s["Won"] ?? 0) > 0)
                 .Select(s =>
                 {
-                    var name = (string)s["Name"] ?? "seat";
+                    var name = (bool?)s["IsPlayer"] == true ? "You" : (string)s["Name"] ?? "A seat";
                     var won = (int?)s["Won"] ?? 0;
                     var hand = (string)s["Hand"];
+
                     return hand == null
                         ? $"{name} wins {won:N0}"
-                        : $"{name} wins {won:N0} with {hand}";
+                        : $"{name} wins {won:N0} with {hand.ToLowerInvariant()}";
                 })
                 .ToArray();
 
             return winners != null && winners.Length > 0
-                ? string.Join("\n", winners)
+                ? string.Join("          ", winners)
                 : "Hand over.";
         }
 
@@ -286,44 +299,211 @@ namespace Poker.Client
         {
             ClearSeats();
 
-            if (seats == null || _seatColumn == null)
+            if (seats == null || _seatLayer == null)
             {
                 return;
             }
 
-            foreach (var seat in seats.OfType<JObject>())
+            var all = seats.OfType<JObject>().ToList();
+
+            foreach (var seat in all)
             {
-                var index = (int?)seat["Index"] ?? 0;
-                var name = (string)seat["Name"] ?? $"Seat {index}";
-                var stack = (int?)seat["Stack"] ?? 0;
-                var committed = (int?)seat["CommittedThisStreet"] ?? 0;
-                var folded = (bool?)seat["Folded"] ?? false;
-                var allIn = (bool?)seat["IsAllIn"] ?? false;
-                var isTurn = (bool?)seat["IsTurn"] ?? false;
-                var isPlayer = (bool?)seat["IsPlayer"] ?? false;
-                var hand = (string)seat["Hand"];
-
-                // Cards are absent rather than blanked when they may not be seen, so
-                // an empty list is the honest instruction to draw backs. Never key
-                // this off the street: a hand that ends with everybody folding never
-                // reaches a showdown, and reading the street would show the winner's
-                // cards on most pots.
-                var cards = seat["Cards"]?.Select(c => (string)c).ToArray() ?? new string[0];
-
-                var marks = new List<string>();
-                if (index == button) marks.Add("D");
-                if (folded) marks.Add("folded");
-                if (allIn) marks.Add("all in");
-                if (hand != null) marks.Add(hand);
-
-                var label =
-                    $"{(isTurn ? ">" : " ")} {(isPlayer ? "YOU" : name)}"
-                    + $"    {stack:N0}"
-                    + (committed > 0 ? $"    bet {committed:N0}" : string.Empty)
-                    + (marks.Count > 0 ? $"    [{string.Join(", ", marks)}]" : string.Empty);
-
-                BuildSeatRow(label, cards, folded, isTurn, isPlayer);
+                BuildSeat(seat, button, all.Count);
             }
+        }
+
+        /// <summary>
+        /// One seat, placed on the ellipse the felt is drawn as.
+        ///
+        /// The player is always seat 0 in the engine and is always drawn at the
+        /// bottom, which is where the person at the keyboard expects to be sitting.
+        /// Where a seat is drawn is presentation and never reaches the engine: the
+        /// deal order is fixed by seat index, not by position on screen.
+        /// </summary>
+        private static void BuildSeat(JObject seat, int button, int total)
+        {
+            var index = (int?)seat["Index"] ?? 0;
+            var name = (string)seat["Name"] ?? ("Seat " + index);
+            var stack = (int?)seat["Stack"] ?? 0;
+            var committed = (int?)seat["CommittedThisStreet"] ?? 0;
+            var folded = (bool?)seat["Folded"] ?? false;
+            var allIn = (bool?)seat["IsAllIn"] ?? false;
+            var isTurn = (bool?)seat["IsTurn"] ?? false;
+            var isPlayer = (bool?)seat["IsPlayer"] ?? false;
+            var hand = (string)seat["Hand"];
+            var won = (int?)seat["Won"] ?? 0;
+
+            // Cards are absent rather than blanked when they may not be seen, so an
+            // empty list is the honest instruction to draw backs. Never key this off
+            // the street: a hand that ends with everybody folding never reaches a
+            // showdown, and reading the street would show the winner's cards on most
+            // pots.
+            var cards = seat["Cards"]?.Select(c => (string)c).ToArray() ?? new string[0];
+
+            var holder = NewBox("Seat" + index, _seatLayer, Color.clear);
+            holder.anchorMin = holder.anchorMax = new Vector2(0.5f, 0.5f);
+            holder.pivot = new Vector2(0.5f, 0.5f);
+            holder.sizeDelta = new Vector2(SeatWidth, isPlayer ? 214f : 180f);
+            holder.anchoredPosition = SeatPosition(index, total);
+
+            var column = holder.gameObject.AddComponent<VerticalLayoutGroup>();
+            column.spacing = 5f;
+            column.childAlignment = TextAnchor.UpperCenter;
+            column.childForceExpandWidth = false;
+            column.childForceExpandHeight = false;
+            column.childControlWidth = false;
+            column.childControlHeight = false;
+
+            BuildSeatCards(holder, cards, isPlayer, folded);
+            BuildSeatPlaque(holder, name, stack, committed, folded, allIn, isTurn, isPlayer, index == button);
+
+            // Only at a showdown, and only for a seat that reached one -- the server
+            // fills Hand in exactly then.
+            if (hand != null)
+            {
+                var reading = NewText(
+                    "Hand",
+                    holder,
+                    won > 0 ? hand + "   +" + won.ToString("N0") : hand,
+                    15f,
+                    TextAlignmentOptions.Center);
+
+                reading.rectTransform.sizeDelta = new Vector2(SeatWidth, 22f);
+                reading.color = won > 0 ? Gold : Dim;
+            }
+        }
+
+        /// <summary>
+        /// The seat's two cards. The player's are larger because they are the ones
+        /// actually being read; everyone else's only need to be identifiable.
+        /// </summary>
+        private static void BuildSeatCards(RectTransform holder, string[] cards, bool isPlayer, bool folded)
+        {
+            var scale = isPlayer ? 0.66f : 0.44f;
+
+            var cardRow = NewBox("Cards", holder, Color.clear);
+            cardRow.sizeDelta = new Vector2(SeatWidth, (CardView.Height * scale) + 4f);
+
+            var pair = cardRow.gameObject.AddComponent<HorizontalLayoutGroup>();
+            pair.spacing = 6f;
+            pair.childAlignment = TextAnchor.MiddleCenter;
+            pair.childForceExpandWidth = false;
+            pair.childForceExpandHeight = false;
+            pair.childControlWidth = false;
+            pair.childControlHeight = false;
+
+            for (var i = 0; i < 2; i++)
+            {
+                var code = i < cards.Length ? cards[i] : null;
+                var card = CardView.Build(cardRow, code, _font);
+
+                // Scaled rather than resized, so CardView keeps its own proportions --
+                // including the drawn fallback it uses when the art is missing.
+                var rect = (RectTransform)card.transform;
+                rect.localScale = new Vector3(scale, scale, 1f);
+
+                // A folded seat keeps its cards, dimmed, so the shape of the table
+                // stays readable instead of seats vanishing mid-hand.
+                if (folded)
+                {
+                    Fade(card, 0.3f);
+                }
+            }
+        }
+
+        private static void BuildSeatPlaque(
+            RectTransform holder,
+            string name,
+            int stack,
+            int committed,
+            bool folded,
+            bool allIn,
+            bool isTurn,
+            bool isPlayer,
+            bool hasButton)
+        {
+            var plaque = NewBox("Plaque", holder, Color.white);
+            plaque.sizeDelta = new Vector2(SeatWidth, isPlayer ? 76f : 68f);
+
+            var face = plaque.GetComponent<Image>();
+            face.sprite = Textures.RoundedBox(
+                8,
+                isTurn ? new Color(0.22f, 0.19f, 0.08f, 0.97f) : new Color(0.05f, 0.06f, 0.06f, 0.93f),
+                isTurn ? Gold : new Color(0.30f, 0.30f, 0.28f, 1f),
+                isTurn ? 3 : 1);
+            face.type = Image.Type.Sliced;
+
+            var title = NewText(
+                "Name", plaque, isPlayer ? "YOU" : name, isPlayer ? 20f : 18f, TextAlignmentOptions.Center);
+
+            title.rectTransform.anchorMin = new Vector2(0f, 1f);
+            title.rectTransform.anchorMax = new Vector2(1f, 1f);
+            title.rectTransform.pivot = new Vector2(0.5f, 1f);
+
+            // Inset, so a long name stops before the dealer badge rather than under it.
+            title.rectTransform.sizeDelta = new Vector2(-52f, 28f);
+            title.rectTransform.anchoredPosition = new Vector2(0f, -4f);
+            title.color = folded ? Dim : (isPlayer ? Gold : Ink);
+            title.overflowMode = TextOverflowModes.Ellipsis;
+
+            var detail = folded
+                ? "folded"
+                : allIn
+                    ? stack.ToString("N0") + "     all in"
+                    : committed > 0
+                        ? stack.ToString("N0") + "     bet " + committed.ToString("N0")
+                        : stack.ToString("N0");
+
+            var under = NewText("Stack", plaque, detail, 16f, TextAlignmentOptions.Center);
+            under.rectTransform.anchorMin = new Vector2(0f, 0f);
+            under.rectTransform.anchorMax = new Vector2(1f, 0f);
+            under.rectTransform.pivot = new Vector2(0.5f, 0f);
+            under.rectTransform.sizeDelta = new Vector2(-10f, 26f);
+            under.rectTransform.anchoredPosition = new Vector2(0f, 6f);
+            under.color = folded ? Dim : Ink;
+
+            // The dealer button as a marker rather than a word: it moves every hand,
+            // and a badge is read at a glance where a letter in a list is not.
+            if (!hasButton)
+            {
+                return;
+            }
+
+            var badge = NewBox("Button", plaque, Color.white);
+            badge.anchorMin = badge.anchorMax = new Vector2(0f, 1f);
+            badge.pivot = new Vector2(0f, 1f);
+            badge.sizeDelta = new Vector2(28f, 28f);
+            badge.anchoredPosition = new Vector2(7f, -5f);
+
+            var badgeFace = badge.GetComponent<Image>();
+            badgeFace.sprite = Textures.RoundedBox(14, new Color(0.93f, 0.91f, 0.86f, 1f), Gold, 2);
+            badgeFace.type = Image.Type.Sliced;
+
+            var d = NewText("D", badge, "D", 15f, TextAlignmentOptions.Center);
+            Stretch(d.rectTransform);
+            d.color = new Color(0.10f, 0.10f, 0.10f, 1f);
+        }
+
+        /// <summary>
+        /// Where a seat sits on the ellipse.
+        ///
+        /// Seat 0 -- the player -- goes at the bottom and the rest run round from
+        /// there, so the table reads the way one looks at it from a chair.
+        /// </summary>
+        private static Vector2 SeatPosition(int index, int total)
+        {
+            if (total <= 1)
+            {
+                return new Vector2(0f, -SeatRadiusY);
+            }
+
+            // -90 degrees is the bottom of the circle in Unity's coordinates.
+            var degrees = -90f - (index * (360f / total));
+            var radians = degrees * Mathf.Deg2Rad;
+
+            return new Vector2(
+                Mathf.Cos(radians) * SeatRadiusX,
+                Mathf.Sin(radians) * SeatRadiusY);
         }
 
         /// <summary>
@@ -367,7 +547,7 @@ namespace Poker.Client
                 }
 
                 var label = string.Equals(move, "Call", StringComparison.OrdinalIgnoreCase) && toCall > 0
-                    ? $"CALL {toCall:N0}"
+                    ? "CALL " + toCall.ToString("N0")
                     : move.ToUpperInvariant();
 
                 var captured = move;
@@ -378,13 +558,17 @@ namespace Poker.Client
             {
                 _raiseTo = Mathf.Clamp(_raiseTo <= 0 ? minRaise : _raiseTo, minRaise, maxRaise);
 
-                actions.Add(Action("-", () => Nudge(-minRaise, minRaise, maxRaise)));
-                actions.Add(Action($"RAISE TO {_raiseTo:N0}", () => Act("Raise", _raiseTo)));
-                actions.Add(Action("+", () => Nudge(minRaise, minRaise, maxRaise)));
+                // Step by the smallest chip, so every amount the player can pick is
+                // one the table can actually show.
+                var step = ChipView.Smallest;
+
+                actions.Add(Action("-", () => Nudge(-step, minRaise, maxRaise)));
+                actions.Add(Action("RAISE TO " + _raiseTo.ToString("N0"), () => Act("Raise", _raiseTo)));
+                actions.Add(Action("+", () => Nudge(step, minRaise, maxRaise)));
 
                 if (maxRaise > minRaise)
                 {
-                    actions.Add(Action($"ALL IN {maxRaise:N0}", () => Act("Raise", maxRaise)));
+                    actions.Add(Action("ALL IN " + maxRaise.ToString("N0"), () => Act("Raise", maxRaise)));
                 }
             }
 
@@ -392,10 +576,10 @@ namespace Poker.Client
         }
 
         /// <summary>
-        /// Steps the raise by the minimum increment. Redrawn from the view already in
-        /// hand rather than by asking the server, because choosing an amount is not a
-        /// move: a round trip here would let the table change between the player
-        /// pressing + and pressing raise.
+        /// Steps the raise. Redrawn from the view already in hand rather than by
+        /// asking the server, because choosing an amount is not a move: a round trip
+        /// here would let the table change between the player pressing + and pressing
+        /// raise.
         /// </summary>
         private static void Nudge(int by, int min, int max)
         {
@@ -428,9 +612,25 @@ namespace Poker.Client
             }
         }
 
+        /// <summary>Dims a built card without knowing how it was assembled.</summary>
+        private static void Fade(GameObject card, float alpha)
+        {
+            foreach (var image in card.GetComponentsInChildren<Image>(true))
+            {
+                var c = image.color;
+                image.color = new Color(c.r, c.g, c.b, c.a * alpha);
+            }
+
+            foreach (var label in card.GetComponentsInChildren<TextMeshProUGUI>(true))
+            {
+                var c = label.color;
+                label.color = new Color(c.r, c.g, c.b, c.a * alpha);
+            }
+        }
+
         /// <summary>
-        /// The pot, drawn as chips. Rebuilt each view rather than mutated, the same
-        /// as the board and the action strip: it changes on nearly every action.
+        /// The pot, drawn as chips. Rebuilt each view rather than mutated, the same as
+        /// the board and the action strip: it changes on nearly every action.
         /// </summary>
         private static void SetPot(int? pot)
         {
@@ -449,19 +649,51 @@ namespace Poker.Client
                 return;
             }
 
-            ChipView.Build(_potHolder, pot.Value, _font, size: 46f);
+            ChipView.Build(_potHolder, pot.Value, _font, size: 40f);
         }
 
         private static void ClearSeats()
         {
-            if (_seatColumn == null)
+            if (_seatLayer == null)
             {
                 return;
             }
 
-            for (var i = _seatColumn.childCount - 1; i >= 0; i--)
+            for (var i = _seatLayer.childCount - 1; i >= 0; i--)
             {
-                UnityEngine.Object.Destroy(_seatColumn.GetChild(i).gameObject);
+                UnityEngine.Object.Destroy(_seatLayer.GetChild(i).gameObject);
+            }
+        }
+
+        /// <summary>
+        /// Redraws the community cards. Rebuilt rather than mutated: five cards is
+        /// nothing to build, and reusing them means tracking which slot holds what.
+        /// </summary>
+        private static void SetBoard(string[] codes)
+        {
+            if (_board == null)
+            {
+                return;
+            }
+
+            for (var i = _board.childCount - 1; i >= 0; i--)
+            {
+                UnityEngine.Object.Destroy(_board.GetChild(i).gameObject);
+            }
+
+            for (var i = 0; i < 5; i++)
+            {
+                var dealt = codes != null && i < codes.Length;
+                var card = CardView.Build(_board, dealt ? codes[i] : null, _font);
+
+                ((RectTransform)card.transform).localScale = new Vector3(0.78f, 0.78f, 1f);
+
+                // An undealt slot is left as a ghost rather than a card back. A back
+                // means a card exists and is hidden, which on the board never happens.
+                if (!dealt)
+                {
+                    Fade(card, 0.16f);
+                }
             }
         }
 
@@ -484,34 +716,46 @@ namespace Poker.Client
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = new Vector2(1920f, 1080f);
 
-            // Match height, not a blend. Blending grows the window with screen width,
-            // so an ultrawide gets it stretched across the monitor.
+            // Match height, not a blend. Blending grows the table with screen width,
+            // so an ultrawide gets it stretched across the monitor instead of one
+            // table with dark either side.
             scaler.matchWidthOrHeight = 1f;
 
             _root = canvasObject;
 
             // The backdrop is what swallows clicks meant for the menu underneath. It
             // needs a Graphic to be raycast at all, hence a nearly-opaque image rather
-            // than an empty transform.
-            var backdrop = NewBox("Backdrop", canvasObject.transform, new Color(0f, 0f, 0f, 0.88f));
+            // than an empty transform. Darker than it was: the menu showing through
+            // behind the seats was most of what made the table hard to read.
+            var backdrop = NewBox("Backdrop", canvasObject.transform, new Color(0f, 0f, 0f, 0.93f));
             Stretch(backdrop);
 
-            var window = NewBox("Window", canvasObject.transform, Color.clear);
-            window.anchorMin = window.anchorMax = new Vector2(0.5f, 0.5f);
-            window.pivot = new Vector2(0.5f, 0.5f);
-            window.sizeDelta = new Vector2(1500f, 1030f);
-
-            var title = NewText("Title", window, "POKER", 32f, TextAlignmentOptions.Top);
-            title.rectTransform.anchorMin = new Vector2(0f, 1f);
-            title.rectTransform.anchorMax = new Vector2(1f, 1f);
+            var title = NewText("Title", canvasObject.transform, "POKER", 30f, TextAlignmentOptions.Center);
+            title.rectTransform.anchorMin = new Vector2(0.5f, 1f);
+            title.rectTransform.anchorMax = new Vector2(0.5f, 1f);
             title.rectTransform.pivot = new Vector2(0.5f, 1f);
-            title.rectTransform.sizeDelta = new Vector2(-60f, 46f);
-            title.rectTransform.anchoredPosition = new Vector2(0f, -6f);
+            title.rectTransform.sizeDelta = new Vector2(600f, 44f);
+            title.rectTransform.anchoredPosition = new Vector2(0f, -18f);
+            title.color = Gold;
 
-            BuildTable(window);
-            BuildSeatColumn(window);
-            BuildStatus(window);
-            BuildActionRow(window);
+            // The felt sits above centre: the seat ring reaches further below it than
+            // above, and the bottom seat is the player's, which needs to clear the
+            // status line and the action strip.
+            var stage = NewBox("Stage", canvasObject.transform, Color.clear);
+            stage.anchorMin = stage.anchorMax = new Vector2(0.5f, 0.5f);
+            stage.pivot = new Vector2(0.5f, 0.5f);
+            stage.sizeDelta = new Vector2(FeltWidth, FeltHeight);
+            stage.anchoredPosition = new Vector2(0f, 54f);
+
+            BuildTable(stage);
+
+            // Seats on their own layer above the felt, so a plaque overlapping the rim
+            // draws over the cloth rather than under it.
+            _seatLayer = NewBox("Seats", stage, Color.clear);
+            Stretch(_seatLayer);
+
+            BuildStatus(canvasObject.transform);
+            BuildActionRow(canvasObject.transform);
         }
 
         /// <summary>
@@ -525,10 +769,7 @@ namespace Poker.Client
         private static void BuildTable(RectTransform parent)
         {
             var felt = NewBox("Felt", parent, Color.white);
-            felt.anchorMin = felt.anchorMax = new Vector2(0.5f, 1f);
-            felt.pivot = new Vector2(0.5f, 1f);
-            felt.sizeDelta = new Vector2(1150f, 1150f / TableAspect);
-            felt.anchoredPosition = new Vector2(0f, -56f);
+            Stretch(felt);
 
             var image = felt.GetComponent<Image>();
             var photo = Textures.FromFile(TableImagePath);
@@ -548,11 +789,11 @@ namespace Poker.Client
             _board = NewBox("Board", felt, Color.clear);
             _board.anchorMin = _board.anchorMax = new Vector2(0.5f, 0.5f);
             _board.pivot = new Vector2(0.5f, 0.5f);
-            _board.sizeDelta = new Vector2(5f * CardView.Width + 4f * 14f, CardView.Height);
-            _board.anchoredPosition = new Vector2(0f, 20f);
+            _board.sizeDelta = new Vector2((5f * CardView.Width * 0.78f) + (4f * 10f), CardView.Height * 0.78f);
+            _board.anchoredPosition = new Vector2(0f, 24f);
 
             var row = _board.gameObject.AddComponent<HorizontalLayoutGroup>();
-            row.spacing = 14f;
+            row.spacing = 10f;
             row.childAlignment = TextAnchor.MiddleCenter;
             row.childForceExpandWidth = false;
             row.childForceExpandHeight = false;
@@ -562,8 +803,8 @@ namespace Poker.Client
             _potHolder = NewBox("Pot", felt, Color.clear);
             _potHolder.anchorMin = _potHolder.anchorMax = new Vector2(0.5f, 0.5f);
             _potHolder.pivot = new Vector2(0.5f, 0.5f);
-            _potHolder.sizeDelta = new Vector2(460f, 52f);
-            _potHolder.anchoredPosition = new Vector2(0f, -78f);
+            _potHolder.sizeDelta = new Vector2(460f, 46f);
+            _potHolder.anchoredPosition = new Vector2(0f, -74f);
 
             var potRow = _potHolder.gameObject.AddComponent<HorizontalLayoutGroup>();
             potRow.childAlignment = TextAnchor.MiddleCenter;
@@ -575,82 +816,25 @@ namespace Poker.Client
             SetBoard(null);
         }
 
-        private static void BuildSeatColumn(RectTransform parent)
+        private static void BuildStatus(Transform parent)
         {
-            _seatColumn = NewBox("Seats", parent, Color.clear);
-            _seatColumn.anchorMin = new Vector2(0.5f, 1f);
-            _seatColumn.anchorMax = new Vector2(0.5f, 1f);
-            _seatColumn.pivot = new Vector2(0.5f, 1f);
-            _seatColumn.sizeDelta = new Vector2(1150f, 320f);
-            _seatColumn.anchoredPosition = new Vector2(0f, -(56f + 1150f / TableAspect) - 12f);
-
-            var column = _seatColumn.gameObject.AddComponent<VerticalLayoutGroup>();
-            column.spacing = 6f;
-            column.childAlignment = TextAnchor.UpperCenter;
-            column.childForceExpandWidth = false;
-            column.childForceExpandHeight = false;
-            column.childControlWidth = false;
-            column.childControlHeight = false;
-        }
-
-        private static void BuildSeatRow(
-            string label, string[] cards, bool folded, bool isTurn, bool isPlayer)
-        {
-            var row = NewBox("Seat", _seatColumn, isTurn ? new Color(0.16f, 0.15f, 0.09f, 0.85f) : Color.clear);
-            row.sizeDelta = new Vector2(1100f, 54f);
-
-            var strip = row.gameObject.AddComponent<HorizontalLayoutGroup>();
-            strip.spacing = 8f;
-            strip.padding = new RectOffset(14, 14, 4, 4);
-            strip.childAlignment = TextAnchor.MiddleLeft;
-            strip.childForceExpandWidth = false;
-            strip.childForceExpandHeight = false;
-            strip.childControlWidth = false;
-            strip.childControlHeight = false;
-
-            var text = NewText("Label", row, label, isPlayer ? 21f : 19f, TextAlignmentOptions.Left);
-            text.rectTransform.sizeDelta = new Vector2(760f, 44f);
-            text.color = folded ? Dim : (isPlayer ? Gold : Ink);
-
-            // Small cards on the row. Two per seat, scaled down so a five-handed table
-            // fits under the felt without the rows becoming card-sized themselves.
-            var holder = NewBox("Cards", row, Color.clear);
-            holder.sizeDelta = new Vector2(2f * CardView.Width * 0.34f + 6f, CardView.Height * 0.34f);
-
-            var pair = holder.gameObject.AddComponent<HorizontalLayoutGroup>();
-            pair.spacing = 6f;
-            pair.childAlignment = TextAnchor.MiddleLeft;
-            pair.childForceExpandWidth = false;
-            pair.childForceExpandHeight = false;
-            pair.childControlWidth = false;
-            pair.childControlHeight = false;
-
-            for (var i = 0; i < 2; i++)
-            {
-                var code = cards != null && i < cards.Length ? cards[i] : null;
-                var card = CardView.Build(holder, code, _font);
-                card.transform.localScale = new Vector3(0.34f, 0.34f, 1f);
-            }
-        }
-
-        private static void BuildStatus(RectTransform parent)
-        {
-            _status = NewText("Status", parent, string.Empty, 19f, TextAlignmentOptions.Top);
+            _status = NewText("Status", parent, string.Empty, 19f, TextAlignmentOptions.Center);
             _status.rectTransform.anchorMin = new Vector2(0.5f, 0f);
             _status.rectTransform.anchorMax = new Vector2(0.5f, 0f);
             _status.rectTransform.pivot = new Vector2(0.5f, 0f);
-            _status.rectTransform.sizeDelta = new Vector2(1200f, 110f);
-            _status.rectTransform.anchoredPosition = new Vector2(0f, 84f);
+            _status.rectTransform.sizeDelta = new Vector2(1600f, 30f);
+            _status.rectTransform.anchoredPosition = new Vector2(0f, 88f);
+            _status.color = Ink;
         }
 
-        private static void BuildActionRow(RectTransform parent)
+        private static void BuildActionRow(Transform parent)
         {
             _actionRow = NewBox("Actions", parent, Color.clear);
             _actionRow.anchorMin = new Vector2(0.5f, 0f);
             _actionRow.anchorMax = new Vector2(0.5f, 0f);
             _actionRow.pivot = new Vector2(0.5f, 0f);
-            _actionRow.sizeDelta = new Vector2(1400f, 56f);
-            _actionRow.anchoredPosition = new Vector2(0f, 16f);
+            _actionRow.sizeDelta = new Vector2(1600f, 52f);
+            _actionRow.anchoredPosition = new Vector2(0f, 26f);
 
             var strip = _actionRow.gameObject.AddComponent<HorizontalLayoutGroup>();
             strip.spacing = 10f;
@@ -687,44 +871,20 @@ namespace Poker.Client
         private static void BuildButton(Transform parent, string label, Action onClick)
         {
             var box = NewBox("Button_" + label, parent, Color.white);
-            box.sizeDelta = new Vector2(Mathf.Max(120f, 22f + label.Length * 13f), 46f);
+            box.sizeDelta = new Vector2(Mathf.Max(72f, 26f + (label.Length * 12f)), 44f);
 
             var image = box.GetComponent<Image>();
             image.sprite = Textures.ButtonFace(
                 6,
-                new Color(0.20f, 0.22f, 0.20f, 1f),
-                new Color(0.12f, 0.14f, 0.12f, 1f),
+                new Color(0.19f, 0.20f, 0.19f, 1f),
+                new Color(0.11f, 0.12f, 0.11f, 1f),
                 Gold);
             image.type = Image.Type.Sliced;
 
-            var text = NewText("Label", box, label, 19f, TextAlignmentOptions.Center);
+            var text = NewText("Label", box, label, 18f, TextAlignmentOptions.Center);
             Stretch(text.rectTransform);
 
-            var button = box.gameObject.AddComponent<Button>();
-            button.onClick.AddListener(() => onClick());
-        }
-
-        /// <summary>
-        /// Redraws the community cards. Rebuilt rather than mutated: five cards is
-        /// nothing to build, and reusing them means tracking which slot holds what.
-        /// </summary>
-        private static void SetBoard(string[] codes)
-        {
-            if (_board == null)
-            {
-                return;
-            }
-
-            for (var i = _board.childCount - 1; i >= 0; i--)
-            {
-                UnityEngine.Object.Destroy(_board.GetChild(i).gameObject);
-            }
-
-            for (var i = 0; i < 5; i++)
-            {
-                var code = codes != null && i < codes.Length ? codes[i] : null;
-                CardView.Build(_board, code, _font);
-            }
+            box.gameObject.AddComponent<Button>().onClick.AddListener(() => onClick());
         }
 
         private static RectTransform NewBox(string name, Transform parent, Color colour)

@@ -20,7 +20,12 @@ namespace Poker.Server;
 /// is known to work.
 /// </summary>
 [Injectable]
-public class PokerService(IBank bank, IProfileGateway profiles, TableStore tables, PokerLog log)
+public class PokerService(
+    IBank bank,
+    IProfileGateway profiles,
+    TableStore tables,
+    INameSource names,
+    PokerLog log)
 {
     /// <summary>Cheap health check. Touches nothing and starts no game.</summary>
     public PingResponse Ping(MongoId sessionId)
@@ -93,7 +98,17 @@ public class PokerService(IBank bank, IProfileGateway profiles, TableStore table
             .Select((character, index) => new BotAgent(character, new Random(seed + index + 1), engineLog))
             .ToList();
 
-        var table = new HoldemTable(rules, request.Seats, rng, engineLog, agents.Cast<IPokerAgent>().ToList());
+        // One name per bot, from the game's own PMC list. Fewer than asked for is
+        // fine -- the table numbers whatever it does not get.
+        var seatNames = names.Take(request.Seats - 1, rng);
+
+        var table = new HoldemTable(
+            rules,
+            request.Seats,
+            rng,
+            engineLog,
+            agents.Cast<IPokerAgent>().ToList(),
+            seatNames);
 
         tables.Set(sessionId, new PlayerSession
         {

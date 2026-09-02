@@ -44,18 +44,26 @@ public sealed class HoldemTable
         int seats = 2,
         Random? rng = null,
         IGameLog? log = null,
-        IReadOnlyList<IPokerAgent>? agents = null)
-        : this(rules ?? new HoldemRules(), new Deck(rng, log), seats, log, agents)
+        IReadOnlyList<IPokerAgent>? agents = null,
+        IReadOnlyList<string>? names = null)
+        : this(rules ?? new HoldemRules(), new Deck(rng, log), seats, log, agents, names)
     {
     }
 
     /// <summary>Test seam: run the table against a stacked deck.</summary>
+    /// <param name="names">
+    /// What to call the bots, in seat order. Supplied rather than invented because the
+    /// engine has no business knowing where a good name comes from -- the mod pulls
+    /// them from the game's own PMC list. Short or absent, the remaining seats fall
+    /// back to their number.
+    /// </param>
     public HoldemTable(
         HoldemRules rules,
         Deck deck,
         int seats = 2,
         IGameLog? log = null,
-        IReadOnlyList<IPokerAgent>? agents = null)
+        IReadOnlyList<IPokerAgent>? agents = null,
+        IReadOnlyList<string>? names = null)
     {
         _rules = rules;
         _deck = deck;
@@ -80,7 +88,15 @@ public sealed class HoldemTable
         for (var index = 0; index < seats; index++)
         {
             var isPlayer = index == PlayerSeatIndex;
-            _seats.Add(new HoldemSeat(index, isPlayer, isPlayer ? "You" : $"Seat {index}", rules.BuyIn));
+            var botNumber = index - 1;
+
+            var name = isPlayer
+                ? "You"
+                : names is not null && botNumber < names.Count && !string.IsNullOrWhiteSpace(names[botNumber])
+                    ? names[botNumber]
+                    : $"Seat {index}";
+
+            _seats.Add(new HoldemSeat(index, isPlayer, name, rules.BuyIn));
 
             if (!isPlayer && agents is not null)
             {
