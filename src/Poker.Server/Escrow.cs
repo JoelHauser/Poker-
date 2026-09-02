@@ -117,7 +117,17 @@ public class EscrowStore : IEscrowStore
         {
             try
             {
-                _fileUtil.WriteFile(_path, _jsonUtil.Serialize(_held, true));
+                var json = _jsonUtil.Serialize(_held, true);
+
+                if (json is null)
+                {
+                    // Writing nothing would truncate the file and lose every stack it
+                    // was holding, which is worse than failing to write at all.
+                    _logger.Error($"[Poker] the outstanding stacks would not serialise -- {_path} left as it was.");
+                    return;
+                }
+
+                _fileUtil.WriteFile(_path, json);
             }
             catch (Exception ex)
             {

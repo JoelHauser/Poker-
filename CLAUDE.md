@@ -659,10 +659,17 @@ early -- which is most of them.
 ## Shipping it to an install
 
 ```
-./scripts/pack-mod.ps1                         # releases/Poker-<ver>-SPT4.1.zip
-./scripts/pack-mod.ps1 -InstallPath 'H:\SPT4.1.X'
+./scripts/pack-mod.ps1                          # server only, anywhere
+./scripts/pack-mod.ps1 -InstallPath 'H:\SPT4.1.X'   # both halves, on the game box
 ./scripts/smoke.ps1 -SessionId <id> -PingOnly
 ```
+
+**`-InstallPath` is what makes it a whole mod.** With it the script also builds the
+client plugin against that install, stages it under `BepInEx/plugins/Poker` with the
+card and chip art, and copies both halves in. Without it there is nothing to compile
+the client against, so the zip carries the server alone and is named
+`-server-only` -- a half mod that looks like a whole one is worse than one that is
+obviously partial.
 
 The zip lays out as `SPT_Runtime/user/mods/Poker/` and extracts at the **root** of
 the install, which is how Blackjack ships. It carries only this mod's two
