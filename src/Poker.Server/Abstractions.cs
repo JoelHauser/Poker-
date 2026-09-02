@@ -38,8 +38,13 @@ public interface IBank
     /// The running server's stack limit for a wallet, which item mods change.
     ///
     /// Read live, never assumed: the base database says roubles stack to 1,000,000
-    /// and that bitcoin does not stack at all, while BarterItemsStacks raises both.
+    /// and dollars and euros to 50,000, while BarterItemsStacks raises all three.
     /// Both are correct on different servers.
+    ///
+    /// Still worth reading live now that only currency is stakeable. The limit is what
+    /// decides how many stacks a payout splits into, an item mod can set it to
+    /// anything, and a limit of zero makes the splitting loop take zero each pass and
+    /// hang a server thread rather than fail.
     /// </summary>
     int MaxStackSize(Wallet wallet);
 }

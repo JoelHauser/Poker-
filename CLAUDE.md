@@ -1,8 +1,8 @@
 # Poker -- working notes for Claude
 
 A poker table for the SPT hideout. Server mod in C# (.NET 10) against SPT 4.1.3,
-with a BepInEx client plugin. Players stake roubles, dollars, euros, GP coins,
-bitcoin or Lega medals.
+with a BepInEx client plugin. Players buy in with **roubles, dollars or euros** --
+spendable currency only. See "Currency only, and why the valuables went".
 
 Sibling project to **Blackjack** (`../Blackjack`), which is shipped and working at
 1.0.2. **The core of this mod comes from there.** Most of what is written here was
@@ -130,7 +130,7 @@ Line counts are from the working tree, as a sense of what each piece costs.
 | `src/Blackjack.Server/Bank.cs` | 295 | The money. Stack walking, live `StackMaxSize`, balance checks either side of every move, shortfall-to-mail. Carries no blackjack rules at all. |
 | `src/Blackjack.Server/ProfileGateway.cs` | 38 | `HasProfile` / `SaveAsync`. |
 | `src/Blackjack.Server/Abstractions.cs` | 70 | `IBank`, `IProfileGateway`, `IStatsStore`, `IEscrowStore`. The seams that make the service testable with no server. |
-| `src/Blackjack.Server/Wallets.cs` | 90 | Six wallets, templates, symbols, per-wallet limits. **Retune the limits** -- see "The payout scale". |
+| `src/Blackjack.Server/Wallets.cs` | 90 | Six wallets, templates, symbols, per-wallet limits. **Ported, then cut to three** -- currency only. See "Currency only, and why the valuables went". |
 | `src/Blackjack.Server/Escrow.cs` | 146 | Records money taken but not settled, and refunds orphans on next contact. **Needs reworking, not just porting** -- it holds a stake, and hold'em needs it to hold the player's live stack. See "Open items". |
 | `src/Blackjack.Server/BlackjackLog.cs` | 75 | Logger with a verbosity switch and the mod folder. See "Logging". |
 | `src/Blackjack.Server/ModMetadata.cs` | 27 | New name and URL; the `~4.1.3` range is unchanged. The GUID is **`com.mybutthasarash.poker`** -- see "Releasing". |
@@ -580,10 +580,10 @@ What is left is smaller and still real:
   who buys in for X can at most cash out X times the number of seats, so the maximum
   a session can hand back is roughly `buy-in x seats`. That is the figure to size
   wallet limits against.
-- **Bitcoin and Lega medals still have a `StackMaxSize` of 1** -- one item per unit,
-  one grid cell each. A five-handed table with a 10-bitcoin buy-in can hand back 50
-  coins, which is 50 free grid cells. Tighter than roubles by a long way, and the
-  reason valuables want their own buy-in ceiling.
+- ~~**Bitcoin and Lega medals have a `StackMaxSize` of 1.**~~ **Gone with the
+  valuables.** Every remaining wallet stacks in the tens of thousands or better, so a
+  payout is a handful of stacks rather than a pile of individually-gridded items. See
+  "Currency only, and why the valuables went".
 - **Chips need a denomination.** Blackjack never had one because it never had chips.
   A stack of a million roubles cannot be one chip per rouble, so the table needs a
   chip size -- a big blind, effectively -- and the buy-in has to be a whole number of
@@ -858,6 +858,31 @@ rate is also why roubles are the only wallet that works at these stakes: a
 held in numbers like these. Giving each wallet a chips-per-unit rate is what would
 open the rest up.
 
+### Currency only, and why the valuables went
+
+**Roubles, dollars and euros. Nothing else.** GP coins, physical bitcoin and Lega
+medals were stakeable and were removed deliberately. Do not add them back without
+reading this.
+
+- **Bitcoin and Lega medals have a `StackMaxSize` of 1** -- one item per unit, one
+  grid cell each. A five-seat table paying back a doubled-up buy-in hands over a pile
+  of coins measured in free grid cells rather than in money. That one fact drove the
+  buy-in ceilings, forced a separate capped paytable back under UTH, and was the
+  reason the payout scale was this mod's hardest open problem for weeks.
+- **They could never have been tested anyway.** All three read zero on both profiles,
+  so the riskiest payout path in the mod had nothing to exercise it with.
+- **`WalletKind` went with them.** It existed to mark a wallet as something the table
+  should not treat like money, and **nothing ever read it** -- the distinction was
+  carried entirely in the buy-in ceilings. A record field that is never branched on is
+  a comment with a type, so it is now a comment.
+
+What this does **not** fix: dollars and euros still cannot sit down. One chip to the
+unit means a 2,000,000 chip table needs 2,000,000 of something, and their ceilings are
+5,000. **Roubles remain the only wallet a player can actually use**, and the
+chips-per-unit rate is still what opens the other two.
+`AWalletThatCannotCoverTheseStakesIsRefusedByName` pins the refusal, and now does it
+with dollars -- a case a player can really hit -- rather than with bitcoin.
+
 ### Escrow holds the live stack, and that is the whole difference from Blackjack
 
 Blackjack's escrow recorded a *stake* until a hand settled and then dropped it.
@@ -1107,20 +1132,24 @@ Profile `6a8cd3a7e0b8272790f41285` ("test", level 69) is the sandbox. Read off i
 on 1 Sep 2026: 24.9M roubles, 110M dollars, 1.02B euros. The other profile,
 `6a7501c247d2e12a3892aaee` ("SCOOP", level 16), is the real one; leave it alone.
 
-**GP coins, bitcoin and Lega medals are all three at zero there.** That includes
-both wallets with a `StackMaxSize` of 1 -- the riskiest payout path -- so none of
-the three can be exercised by betting until some are added.
+**GP coins, bitcoin and Lega medals were all three at zero there**, which is part of
+why they were dropped: the riskiest payout path in the mod had nothing to exercise it
+with. Moot now -- see "Currency only, and why the valuables went".
 
 ## Wallets, as verified on a real 4.1.3 install
 
-| Wallet | Template | StackMaxSize |
-| --- | --- | --- |
-| Roubles | `5449016a4bdc2d6f028b456f` | 1,000,000 |
-| Dollars | `5696686a4bdc2da3298b456a` | 50,000 |
-| Euros | `569668774bdc2da2298b4568` | 50,000 |
-| GP coins | `5d235b4d86f7742e017bc88a` | 100 |
-| Bitcoin | `59faff1d86f7746c51718c9c` | **1** |
-| Lega medal | `6656560053eaaa7a23349c86` | **1** |
+Only the first three are stakeable. The rest are kept here as verified reference
+data, and as the evidence for why they are not -- see "Currency only, and why the
+valuables went".
+
+| Wallet | Template | StackMaxSize | Stakeable |
+| --- | --- | --- | --- |
+| Roubles | `5449016a4bdc2d6f028b456f` | 1,000,000 | yes, and the only one that works |
+| Dollars | `5696686a4bdc2da3298b456a` | 50,000 | yes, but refused at these stakes |
+| Euros | `569668774bdc2da2298b4568` | 50,000 | yes, but refused at these stakes |
+| GP coins | `5d235b4d86f7742e017bc88a` | 100 | **removed** |
+| Bitcoin | `59faff1d86f7746c51718c9c` | **1** | **removed** |
+| Lega medal | `6656560053eaaa7a23349c86` | **1** | **removed** |
 
 The 4.1.3 namespaces, which are not what older docs say:
 `Helpers.Profile.InventoryHelper`, `Helpers.Profile.ProfileHelper`,
@@ -1167,8 +1196,10 @@ These were settled there against the real client and apply unchanged.
 - **The panel floats over a dimmed hideout**, so freeing the cursor and swallowing
   player input is a hard requirement.
 - **No hotkey.** A key would be reachable from anywhere, including a raid.
-- **Valuables are staked through EFT's own grid component**, dragged into a
-  container. One item type per bet: a mixed stake has no coherent payout.
+- ~~**Valuables are staked through EFT's own grid component**, dragged into a
+  container.~~ **Does not survive here** -- there are no valuables to stake. Currency
+  is a number, not a pile of items, so the buy-in is a figure on a button. See
+  "Currency only, and why the valuables went".
 - ~~**Per-hand settlement, straight to the stash.** No session, no chips, no
   buy-in.~~ **This one did not survive the variant change.** Hold'em cannot settle
   per hand -- a stack is what a bet is sized against and what decides side-pot
@@ -1278,6 +1309,10 @@ reads this first and would have started building one.
   down and the stack credited on standing up, over both transports. **Not yet run
   against a real profile** -- every `InventoryHelper` call in `Bank` is code that has
   never executed on a live server. See "The money".
+- **Currency only, as of the wallet cut.** Roubles, dollars and euros; GP coins,
+  bitcoin and Lega medals are gone, and `WalletKind` with them. Roubles are still the
+  only wallet that can actually cover these stakes. See "Currency only, and why the
+  valuables went".
 - **The client compiles, as of the task-bar tab.** Five commits of client work had
   never once been through a compiler -- `ProfileSync`, the buy-in confirmation, the
   pot column, the close fade and the tab. All five build clean now, and the first
@@ -1322,9 +1357,11 @@ reads this first and would have started building one.
   essentially no inventory and returned zero rather than throwing, which is the
   "state routes are called before anything exists" hazard passing on the money path.
 - **Give each wallet a chips-per-unit rate.** One chip to one unit means only roubles
-  can buy into a 2,000,000 chip table -- dollars, euros and the valuables are refused
-  by name, and their ceilings in `Wallets.cs` are still sized for a game they cannot
-  currently enter. A rate per wallet is what opens them up.
+  can buy into a 2,000,000 chip table, so **dollars and euros are stakeable in the
+  enum and refused in practice** -- their ceilings are 5,000 against a 2,000,000 chip
+  buy-in. A rate per wallet is what opens them up, and it is now the *only* thing
+  standing between the mod and its full wallet list, because the valuables that used
+  to complicate this are gone.
 - **`StatsStore` is still to port**, and the recorded fields are poker's rather than
   blackjack's -- hands played, biggest pot, showdowns won, best hand.
 

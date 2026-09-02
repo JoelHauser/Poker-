@@ -257,17 +257,22 @@ public class MoneyInvariantTests
     public async Task AWalletThatCannotCoverTheseStakesIsRefusedByName()
     {
         // One chip to the unit, so a 2,000,000 chip table cannot be bought into with
-        // bitcoin. Refused with the numbers in the message rather than by silently
-        // failing to debit.
+        // dollars -- they cap at 5,000. Refused with the numbers in the message rather
+        // than by silently failing to debit.
+        //
+        // This used to be pinned with bitcoin, which made the same point far more
+        // dramatically. Dollars keep the rule honest now that only currency is
+        // stakeable, and are the case that actually reaches a player: roubles are the
+        // only wallet these stakes admit until each one has a chips-per-unit rate.
         var harness = Build();
 
         var response = await harness.Service.SitAsync(
-            new SitRequest { Wallet = nameof(Wallet.Bitcoin), BuyIn = 2_000_000, BigBlind = 20_000 },
+            new SitRequest { Wallet = nameof(Wallet.Dollars), BuyIn = 2_000_000, BigBlind = 20_000 },
             Session,
             Output());
 
         Assert.False(response.Ok);
-        Assert.Contains("Bitcoin", response.Error);
+        Assert.Contains("Dollars", response.Error);
         Assert.Equal(0, harness.Bank.Debits);
     }
 

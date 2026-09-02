@@ -56,11 +56,10 @@ public sealed class FakeBank : IBank
         Credits++;
     }
 
-    /// <summary>Roubles stack to a million on a stock server; the rest is irrelevant here.</summary>
+    /// <summary>Roubles stack to a million on a stock server; dollars and euros to 50,000.</summary>
     public int MaxStackSize(Wallet wallet) => wallet switch
     {
         Wallet.Roubles => 1_000_000,
-        Wallet.Bitcoin or Wallet.LegaMedals => 1,
         _ => 50_000,
     };
 }
