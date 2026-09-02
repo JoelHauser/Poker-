@@ -2,6 +2,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using EFT.UI;
 using HarmonyLib;
 using TMPro;
@@ -23,19 +24,46 @@ namespace Poker.Client
     /// The button is a clone of one of the menu's own, and that is what makes it fit
     /// alongside other menu mods rather than in spite of them. See <see cref="Install"/>.
     /// </summary>
+    [HarmonyPatch]
     internal static class MenuButtonPatch
     {
         private const string ButtonName = "PokerButton";
 
-        [HarmonyPatch(typeof(MenuScreen), nameof(MenuScreen.Awake))]
-        [HarmonyPostfix]
-        // ReSharper disable once InconsistentNaming
-        private static void AfterAwake(MenuScreen __instance) => Schedule(__instance);
+        /// <summary>
+        /// Both of the moments the menu is built, looked up by name at load rather than
+        /// named in an attribute.
+        ///
+        /// <c>nameof(MenuScreen.Awake)</c> does not compile against every EFT build: on
+        /// 0.16.9.5 Awake is private and Show's controller argument is an obfuscated
+        /// nested type with no name to write down. Neither is a problem for Harmony,
+        /// which is happy with a MethodBase -- it was only ever a problem for the
+        /// compiler. Asking at runtime also means a build that renames one of them
+        /// costs the button rather than the whole plugin.
+        ///
+        /// This file was ported from Blackjack with the attribute form still on it, and
+        /// it has never compiled here as a result -- the client had never once been
+        /// built. Keep the runtime lookup.
+        /// </summary>
+        private static IEnumerable<MethodBase> TargetMethods()
+        {
+            var awake = AccessTools.Method(typeof(MenuScreen), "Awake");
+            if (awake != null)
+            {
+                yield return awake;
+            }
 
-        [HarmonyPatch(typeof(MenuScreen), nameof(MenuScreen.Show), typeof(MenuScreen.MainMenuBaseScreenController))]
+            // Every overload: which one the game calls varies by build, and patching a
+            // Show that is never called costs nothing.
+            foreach (var show in AccessTools.GetDeclaredMethods(typeof(MenuScreen))
+                         .Where(m => m.Name == "Show"))
+            {
+                yield return show;
+            }
+        }
+
         [HarmonyPostfix]
         // ReSharper disable once InconsistentNaming
-        private static void AfterShow(MenuScreen __instance) => Schedule(__instance);
+        private static void AfterScreenBuilt(MenuScreen __instance) => Schedule(__instance);
 
         /// <summary>
         /// Rebuilds at the end of the frame rather than immediately.

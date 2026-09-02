@@ -738,6 +738,70 @@ means backs. `HoldemView.Of` keys it off the seat having reached a showdown.
   is how the leapfrog was found. `[Poker] client loaded` confirms the plugin
   started; its absence points at the validator.
 
+### The client had never been compiled, and that hid a real bug
+
+`Poker.Client` can only be built on a box with the game on it, so for five commits it
+was written and never once put through a compiler. The first build found two errors,
+both in `MenuButtonPatch` -- the file the notes list as porting from Blackjack
+*unchanged*:
+
+    'MenuScreen' does not contain a definition for 'Awake'
+    the type name 'MainMenuBaseScreenController' does not exist in the type 'MenuScreen'
+
+It was ported from an older copy of Blackjack that still named its patch targets in
+attributes. **On EFT `0.16.9.5` `MenuScreen.Awake` is private and `Show`'s controller
+argument is an obfuscated nested type with no name to write down**, so neither can be
+named at compile time. Blackjack hit this and moved to a `TargetMethods()` that looks
+both up through `AccessTools` at load; that is now here too. Harmony never minded --
+it takes a `MethodBase`. It was only ever the compiler.
+
+Two things worth keeping from it:
+
+- **"Ports unchanged" is a claim with a shelf life.** The original moved on and this
+  copy did not. When this file says a file ports as-is, diff it against the original
+  rather than trusting the sentence.
+- **A client commit that has not been compiled has not been written.** The notes said
+  "the mod has run in the game" and separately "four commits have never been
+  compiled", and both were true -- the button worked on an older EFT build and the
+  code that drew it had since stopped compiling. Build the client at the first
+  opportunity on any box with an install, even if the game is never started.
+
+### The task-bar tab
+
+`TaskBarTab.cs`, ported from Blackjack, and the reason POKER is reachable from the
+hideout, the flea market or a trader screen rather than only from the main menu. It
+puts a tab on `EFT.UI.PreloaderUI.MenuTaskBar` beside MAIN MENU and HIDEOUT.
+
+It is **not a patch**. `Heartbeat()` polls once a second, because the bar has to be
+found again after every raid and after any mod that rebuilds the row, and a poll
+notices both without naming a method a future build could rename.
+
+**Blackjack's notes are addressed directly to whoever writes the second mod, and both
+of its rules are obeyed here.** They are not style preferences -- each is a bug that
+mod would otherwise ship:
+
+- **Take the template from `_toggleButtons`**, the private dictionary keyed on
+  `EMenuType` that holds only the game's *own* tabs. A mod that instead picks a
+  template geometrically eventually clones **Blackjack's** tab and inherits a diamond
+  and a pile of disabled components. `Keyed()` reads it via `AccessTools.Field`.
+- **Split the row on the spacer's `flexibleWidth`, not on the widest gap.** Added tabs
+  eat that gap, until measuring decides the row is one group and puts the new tab
+  beside SETTINGS. `Divider()` finds the spacer by its `flexibleWidth`.
+
+Two things added here on top of the port:
+
+- **A spade, not Blackjack's diamond.** The two tabs sit side by side with the same
+  label size in the same colour, so the pip is the only thing telling them apart at a
+  glance. `MenuIcon.Spade` normalises rotation and scale on the borrowed icon, because
+  a spade that inherits a mirrored transform comes out looking like a trophy -- which
+  is the reason Blackjack picked the one suit with no up or down.
+- **`IsAnotherModsTab()`** guards the degraded fallback path, so we cannot clone the
+  other mod's tab even if the keyed lookup fails.
+
+The tab and the main-menu button are independent on purpose: the button is a Harmony
+patch inside a `try`, so a patch that will not apply on some future build costs the
+button and leaves the tab, which is the better of the two anyway.
+
 ### Naming the bots
 
 `BotTable` is injectable and `Types["usec"].FirstNames` is the game's own PMC
@@ -1007,7 +1071,12 @@ All read out of 4.1.3 and confirmed against a running server, over in Blackjack.
 
 | Machine | Installs |
 | --- | --- |
-| Joel's Windows box | `H:\SPT4.1.X` (4.1.3) and `H:\SPT2026` (4.0.13) |
+| Joel's home box | `H:\SPT4.1.X` (4.1.3) and `H:\SPT2026` (4.0.13) |
+| Joel's work box | `C:\HUH` -- SPT `4.1.3-RELEASE+ddce41c`, **EFT client `0.16.9.5.40743`** |
+
+**The work box is where the client first compiled, and the EFT build number is why it
+had not.** See "The client had never been compiled, and that hid a real bug". Do not
+launch the game there -- it is a work machine.
 
 With an install present, item templates live at
 `SPT_Runtime/SPT_Data/database/templates/items.json`, the server assemblies at
@@ -1209,9 +1278,19 @@ reads this first and would have started building one.
   down and the stack credited on standing up, over both transports. **Not yet run
   against a real profile** -- every `InventoryHelper` call in `Bank` is code that has
   never executed on a live server. See "The money".
-- **Four commits of client work have never been compiled** -- `ProfileSync`, the
-  buy-in confirmation, the pot column and the close fade. `Poker.Client` is `net472`
-  against the install and cannot be built anywhere else.
+- **The client compiles, as of the task-bar tab.** Five commits of client work had
+  never once been through a compiler -- `ProfileSync`, the buy-in confirmation, the
+  pot column, the close fade and the tab. All five build clean now, and the first
+  build found a real bug that had been sitting in `MenuButtonPatch` since the port.
+  See "The client had never been compiled".
+- **POKER is on the menu task bar**, so the table opens from anywhere out of raid and
+  not only from the main menu. Both of Blackjack's inter-mod rules are obeyed, so the
+  two tabs can sit beside each other. **Not yet seen on a screen** -- see "The task-bar
+  tab".
+- **Both halves are installed at `C:\HUH` and the server loads them.** Version gate
+  passes, all six routes register, the banner prints, no errors. That is the whole of
+  what a headless server can confirm: **nothing in the client has been rendered and no
+  money has moved.**
 - A complete UTH game is in the tree and **parked**. It is green and does no harm;
   nothing new should call into it.
 
@@ -1222,10 +1301,13 @@ reads this first and would have started building one.
 - **Smoke it against a profile.** `-PingOnly` first, then a small buy-in on the test
   profile, watching the console. Every `InventoryHelper` call in `Bank` is still code
   that has never executed. Blackjack's equivalent went wrong in exactly this gap.
-- **Build and smoke the client changes.** `ProfileSync`, the item-event calls and the
-  buy-in confirmation are written but **have never been compiled** -- `Poker.Client`
-  targets `net472` against the install and cannot be built on a machine without the
-  game. That is the first thing to do at the SPT box.
+- ~~**Build the client changes.**~~ **Done** -- they compile, and the build found a
+  bug. What is left is to **see them**: the pot column, the close fade, the buy-in
+  confirmation and the task-bar tab have all been compiled and none has been
+  rendered. A compiler cannot tell you a tab landed beside SETTINGS.
+- **No profile exists on the work box**, so `smoke.ps1` has no session id to use and
+  the ping route cannot be exercised there. Registering one through the launcher API
+  would fix that without starting the game.
 - **Give each wallet a chips-per-unit rate.** One chip to one unit means only roubles
   can buy into a 2,000,000 chip table -- dollars, euros and the valuables are refused
   by name, and their ceilings in `Wallets.cs` are still sized for a game they cannot

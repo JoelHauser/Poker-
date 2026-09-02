@@ -1,4 +1,5 @@
-using BepInEx;
+﻿using BepInEx;
+using BepInEx.Configuration;
 using BepInEx.Logging;
 using HarmonyLib;
 using UnityEngine;
@@ -35,12 +36,61 @@ namespace Poker.Client
         /// </summary>
         internal static PokerClientPlugin Instance;
 
+        /// <summary>
+        /// Whether POKER appears on the bar along the bottom of the menu.
+        ///
+        /// On by default, because the main-menu button only exists on the main menu and
+        /// the bar is on every out-of-raid screen -- which is the difference between
+        /// reaching the table from the hideout and backing out of it first.
+        /// </summary>
+        internal static ConfigEntry<bool> ShowTaskBarTab;
+
+        /// <summary>
+        /// Which end of the bar the tab sits on: with MAIN MENU and HIDEOUT on the left,
+        /// or with CHARACTER and the rest on the right.
+        ///
+        /// Left by default, matching Blackjack. Those two are places you go, which is
+        /// what the table is; the right-hand group is things you look at while you are
+        /// somewhere. With both mods installed the two tabs simply sit beside each other
+        /// -- the row measures itself and neither has to know about the other.
+        /// </summary>
+        internal static ConfigEntry<bool> TabOnRight;
+
         private void Awake()
         {
             Instance = this;
             Log = Logger;
 
-            new Harmony(PluginGuid).PatchAll(typeof(MenuButtonPatch));
+            ShowTaskBarTab = Config.Bind(
+                "Menu",
+                "Show the task-bar tab",
+                true,
+                "Adds POKER to the bar along the bottom of the menu, so the table opens "
+                + "from the hideout, the flea market or a trader screen and not just the main menu.");
+
+            TabOnRight = Config.Bind(
+                "Menu",
+                "Put the tab on the right",
+                false,
+                "Sits the tab with CHARACTER and the rest instead of beside MAIN MENU and HIDEOUT. "
+                + "The tab moves a second or two after this is changed.");
+
+            try
+            {
+                new Harmony(PluginGuid).PatchAll(typeof(MenuButtonPatch));
+            }
+            catch (System.Exception ex)
+            {
+                // The menu button is the second way in, not the only one. A patch that
+                // will not apply on this build must not take the task-bar tab down with
+                // it, and the tab is not a patch at all.
+                Log.LogError("[Poker] the main-menu button could not be installed: " + ex.Message);
+            }
+
+            // The tab is not a patch. It watches for the bar instead, because the bar has
+            // to be found again after every raid and after any mod that rebuilds the row,
+            // and a poll notices both without naming a method that could be renamed.
+            StartCoroutine(TaskBarTab.Heartbeat());
 
             Log.LogInfo("[Poker] client loaded");
         }
