@@ -187,15 +187,10 @@ namespace Poker.Client
 
         private static IEnumerator Fade(CanvasGroup group, float target, Action done)
         {
-            // Leaving takes longer than arriving, and both are eased rather than
-            // linear.
-            //
-            // A straight lerp on a backdrop this opaque is a cross-dissolve: halfway
-            // through you are looking at a half-there table over a half-there menu,
-            // which reads as muddy rather than as leaving. Easing puts most of the
-            // movement at the start, so the table is gone early and the menu resolves
-            // on its own.
-            var duration = target > 0f ? 0.14f : 0.22f;
+            // A sixth of a second, linear, both directions -- the same numbers
+            // Blackjack settled on, because that is the version that was tried and
+            // found to read correctly. Nothing here is a guess to be improved on.
+            const float duration = 0.16f;
 
             var start = group.alpha;
             var elapsed = 0f;
@@ -210,7 +205,7 @@ namespace Poker.Client
                 // Unscaled: the menu is not necessarily running at a normal timescale,
                 // and a fade that stalls with it would hang the panel open.
                 elapsed += Time.unscaledDeltaTime;
-                group.alpha = Mathf.SmoothStep(start, target, Mathf.Clamp01(elapsed / duration));
+                group.alpha = Mathf.Lerp(start, target, Mathf.Clamp01(elapsed / duration));
                 yield return null;
             }
 

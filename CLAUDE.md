@@ -869,14 +869,17 @@ left to a `ContentSizeFitter`** -- the pot holder is itself a layout group with
 `childControl` off, so a fitter resolving a frame later leaves the pot jumping on its
 first draw.
 
-**Closing fades.** The backdrop is 0.93 opaque, so toggling the canvas takes the
-whole screen from table to menu in one frame, which reads as a jump cut. Leaving
-takes longer than arriving (0.22s against 0.14s) and both are eased with
-`SmoothStep`: a straight lerp on a backdrop this opaque is a cross-dissolve, and
-halfway through it you are looking at a half-there table over a half-there menu.
+**Closing fades, and the numbers are Blackjack's.** The backdrop is 0.93 opaque, so
+toggling the canvas takes the whole screen from table to menu in one frame, which
+reads as a hard cut. A `CanvasGroup` on the canvas root fades it: **0.16 seconds,
+linear, both directions**, on unscaled time, with raycasts blocked the moment a close
+starts so a stray click cannot land on a table that is leaving.
 
-Blackjack already had the linear version of this, which is worth knowing before
-assuming a missing fade is the cause of a rough transition there.
+Those numbers are not a first guess -- they are what Blackjack arrived at by trying
+it, and Blackjack's transition is the one that reads correctly. **Do not tune this
+without watching it.** An earlier pass here reasoned that a linear fade on an opaque
+backdrop is a muddy cross-dissolve and "improved" it to an eased, asymmetric one,
+which was substituting an argument for the thing that had already been tested.
 
 ### The buy-in asks first
 
