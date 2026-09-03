@@ -679,15 +679,17 @@ one process is a load conflict waiting to happen.
 **What it does.** Loads, announces itself, serves six routes on two transports, deals
 real no-limit hold'em against the bots from a table inside the game, and **moves
 money**: one chip to one rouble, the buy-in debited on sitting down, the stack
-credited on standing up, an unfinished session paid back on next contact. The startup
-banner says so out loud, because a mod that takes currency out of a stash should
-announce itself before it does.
+credited on standing up, an unfinished session paid back on the next buy-in or
+cash-out. The startup banner says so out loud, because a mod that takes currency out of
+a stash should announce itself before it does -- though it currently says "next
+contact", which is wider than the truth. See "Open items".
 
-**What has actually been run.** The loading, routing and playing were confirmed on a
-real 4.1.3 install. **The money has not been.** It is covered by 21 tests on fakes and
-mutation-checked, but every `InventoryHelper` call in `Bank` is code that has never
-executed on a live server -- which is precisely the gap Blackjack's money path went
-wrong in. `-PingOnly` first, then a small buy-in on the test profile, console open.
+**What has actually been run.** All of it, on a real 4.1.3 install and a real profile:
+loading, routing, playing, and **the money in both directions with the expected balance
+matching the observed one**. See "Current state" for the figures. What is still untried
+is any wallet but roubles -- which needs the chips-per-unit rate before it is even
+reachable -- and the shortfall-to-mail path, which needs a stash too full to take a
+payout.
 
 ### The client plugin
 
@@ -1469,90 +1471,98 @@ Blackjack ships as `com.mybutthasarash.blackjack` on the same rule.
 claiming the server did not exist, four commits after it shipped -- a fresh session
 reads this first and would have started building one.
 
-- Working branch **`uth`** (named before the variant changed), off `main`.
+- Working branch **`uth`** (named before the variant changed), off `main`, and pushed.
+  `main` has not been moved onto it.
 - Green at **210 tests** -- 189 over the engine, 21 over the money -- mutation-checked
   throughout. Every engine test builds its own `HoldemRules`, so the stakes can be
   retuned without touching the suite.
 - **The variant is no-limit Texas Hold'em against bots**, decided after two
   reversals. See the top of this file, and read it before reopening the question.
-- **The mod has run in the game**, as of the build that added the table. There is a
-  POKER button on the main menu, and hands deal, play and settle from inside Tarkov:
+- **THE MONEY HAS RUN, ON A REAL PROFILE, AND IT WAS RIGHT.** 3 Sep 2026 on the home
+  box, profile `6a8cd3a7e0b8272790f41285`, with the server console open. This was the
+  largest open item in the mod and it is closed:
+
+  - Buy-in: `debit 2,000,000 Roubles across 3 stack(s)`, 16,208,844 -> 14,208,844,
+    **and the expected figure matched the observed one** -- which is the check
+    `Bank` does either side of every move and the one Blackjack's money path went
+    wrong without.
+  - Cash-out: `credit 1,660,000`, 14,208,844 -> 15,868,844 in one stack, reported as
+    `1,660,000 against a 2,000,000 buy-in (-340000)`.
+  - **`StackMaxSize` read live as 20,000,000**, not the database's 1,000,000, because
+    that install runs BarterItemsStacks. The note under "Things that will bite you"
+    is confirmed rather than theoretical.
+  - Multiple stacks were walked on the way in (three, then four) and coalesced into
+    one on the way out. Not one error or exception in the whole run.
+
+  What has **not** been exercised: any wallet but roubles, and the shortfall-to-mail
+  path.
+- **A stack is sitting in escrow unpaid right now.** See "Open items" -- this is the
+  one thing the live run turned up, and it is a real fault rather than a loose end.
+- **The mod has run in the game** and hands deal, play and settle from inside Tarkov:
   the version gate passes, the six routes register, the session resolves, the wallets
   read, and hands run through all four streets with re-raises, folds, side stacks and
-  all-ins. Folded seats stay face down at showdown.
-- **Everything since that build is unverified**, which is most of the money and all
-  of the recent client work. What was true then is not a claim about what is in the
-  tree now.
-- **The bots have names** from the game's own PMC list -- Badaimnet, Nick,
-  CEOofHeadEyes -- and one agent per seat, so they are genuinely different people.
+  all-ins. Folded seats stay face down at showdown. The uncalled-bet refund fired in a
+  real hand -- `refunding 1915000 to seat 0 -- bet 2000000 but only 85000 was ever
+  matched` -- which is `PotBuilder`'s two-fail mutation case working on live money.
+- **The table has been seen and looks right**, layout fixes included. See "The table
+  was laid out against the picture".
+- **The tab is the only way in**, at the right size and with the right pip, sitting
+  beside Blackjack's. `MenuButtonPatch` has been deleted along with the F12 setting
+  that briefly hid it, so the mod no longer patches `MenuScreen` at all.
+- **Escape closes the table and nothing else.** See "Escape, and why watching the key
+  was never enough".
+- **The bots have names** from the game's own PMC list -- JoshuaGraham, BSG_FIX_UR_GAME,
+  imhoom__ttv -- and one agent per seat, blended from the named cast (Shark/Maniac,
+  Rock/Gambler) so no two tables are the same.
 - **The chips are real art with real denominations**, and the stakes were retuned
   to fit them: blinds 10k / 20k, buy-in 2,000,000.
-- **The mod moves money.** One chip is one rouble: the buy-in is debited on sitting
-  down and the stack credited on standing up, over both transports. **Not yet run
-  against a real profile** -- every `InventoryHelper` call in `Bank` is code that has
-  never executed on a live server. See "The money".
 - **Currency only, as of the wallet cut.** Roubles, dollars and euros; GP coins,
   bitcoin and Lega medals are gone, and `WalletKind` with them. Roubles are still the
   only wallet that can actually cover these stakes. See "Currency only, and why the
   valuables went".
-- **The client compiles, as of the task-bar tab.** Five commits of client work had
-  never once been through a compiler -- `ProfileSync`, the buy-in confirmation, the
-  pot column, the close fade and the tab. All five build clean now, and the first
-  build found a real bug that had been sitting in `MenuButtonPatch` since the port.
-  See "The client had never been compiled".
-- **POKER is on the menu task bar**, so the table opens from anywhere out of raid and
-  not only from the main menu. Both of Blackjack's inter-mod rules are obeyed, and the
-  two tabs do sit beside each other -- **seen on a screen at the home box**, which is
-  also where the tab came out twice the width of the game's own. See "The pip is 160
-  units wide".
-- **The tab is the only way in**, and `MenuButtonPatch` has been deleted along with the
-  F12 setting that had been hiding it. See "The task-bar tab".
-- **The table has been played and looks right**, and looking at it found three layout
-  faults -- see "The table was laid out against the picture". Fixed and **not yet seen**.
-- **Both halves are installed at `C:\HUH`, the server loads them, and `-PingOnly`
-  passes.** Version gate, six routes, banner, session resolved, profile found, all six
-  wallets read, no errors. That is the whole of what a headless server can confirm:
-  **nothing in the client has been rendered and no money has moved.** The profile
-  there is a launcher stub with no PMC, so the buy-in cannot be smoked until the game
-  is launched once -- see "Open items".
 - A complete UTH game is in the tree and **parked**. It is green and does no harm;
   nothing new should call into it.
 
 ### What to check first at the home box
 
-**Both entrances have been seen and both were fixed**, and the entrances are done: the
-tab sits beside MAIN MENU and HIDEOUT at the right size with the right pip, and the
-main-menu button is gone. The table has been played, and the layout work that
-came out of looking at it is compiled, deployed and **not yet seen**.
+The entrances, the table and the money have all been seen now. What is left is narrow:
 
-In rough order of how likely it is to be wrong:
-
-1. **The community cards sit in the middle of the cloth**, with the pot below them and
-   a gap between the two.
-2. **No plaque overlaps the green.** The seats either side should sit clear of it; the
-   arithmetic says they clear by 12 at every seat count from two to five.
-3. **The player's cards, plaque and hand reading clear the status line and the
-   buttons.** That column had been running straight through both.
-4. **The card rows are evenly spaced** -- the gaps were being set by slots twice the
-   size of the cards in them.
-5. **Then, and only then, the money.** `-PingOnly` first, then one buy-in on the test
-   profile with the console open. Every `InventoryHelper` call in `Bank` is still code
-   that has never executed on a live server.
+1. **The escrow fault below**, which is money the player is currently owed.
+2. **A wallet other than roubles**, which cannot be bought in with at these stakes --
+   so this waits on the chips-per-unit rate.
+3. **The shortfall-to-mail path**, which needs a stash too full to take a payout.
 
 `[Poker] tab, as laid out --` is still in the log if the tab ever looks wrong again; it
 prints the template's geometry and ours side by side.
 
 ### Open items
 
-**The money -- written, tested on fakes, never run for real**
+**The money -- run for real, and one fault found by running it**
 
-- **Smoke it against a profile.** `-PingOnly` first, then a small buy-in on the test
-  profile, watching the console. Every `InventoryHelper` call in `Bank` is still code
-  that has never executed. Blackjack's equivalent went wrong in exactly this gap.
-- ~~**Build the client changes.**~~ **Done** -- they compile, and the build found a
-  bug. What is left is to **see them**: the pot column, the close fade, the buy-in
-  confirmation and the task-bar tab have all been compiled and none has been
-  rendered. A compiler cannot tell you a tab landed beside SETTINGS.
+- ~~**Smoke it against a profile.**~~ **Done, and it was right.** See "Current state"
+  for the figures.
+- **An abandoned stack is only refunded on `sit` or `leave`, never on `state` -- and
+  there is one owed right now.** `RefundAbandoned` is called from `SitAsync` and
+  `LeaveAsync` and from nowhere else, because `State` is a pure read with no
+  `ItemEventRouterResponse` to hang item changes off. So a session that ends by
+  closing the game leaves the stack recorded, and the player's next visit to the
+  panel -- which calls `/poker/state` -- answers "You are not at a table" and returns
+  nothing.
+
+  The startup banner says *"each is paid back on next contact"*, which is not true as
+  written: it is paid back on the next **buy-in or cash-out**. The money is not lost;
+  pressing SIT DOWN refunds the old stack before taking the new buy-in. But the
+  player is never told they are owed it.
+
+  Live example, still on disk at `SPT_Runtime/user/mods/Poker/data/escrow.json`:
+  **2,105,000 roubles held for `6a8cd3a7e0b8272790f41285`** since 3 Sep 2026.
+
+  Worth fixing properly rather than by widening the banner's wording. The state route
+  could carry the note without moving money, or the refund could ride the `sync` item
+  event, which already exists and already has an output to attach to.
+- ~~**Build the client changes.**~~ **Done**, and they have now been seen as well: the
+  tab, the pot column, the buy-in confirmation, the close fade and the whole table
+  layout.
 - ~~**No profile exists on the work box.**~~ One was registered, and **`-PingOnly`
   passes there**: route reachable, session resolved, profile found, all six wallets
   read, stack limits reported on first contact, no errors either side. The HTTPS,
