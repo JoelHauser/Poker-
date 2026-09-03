@@ -813,6 +813,16 @@ The tab and the main-menu button are independent on purpose: the button is a Har
 patch inside a `try`, so a patch that will not apply on some future build costs the
 button and leaves the tab, which is the better of the two anyway.
 
+**The tab is now the only way in, and the main-menu button is off by default.** Seen
+side by side, the button was the weaker entrance twice over: it exists only on the main
+menu, where the tab is on every out-of-raid screen, and it adds a card game to a list of
+five that reads ESCAPE FROM TARKOV, CHARACTER, TRADING, HIDEOUT, EXIT. With Blackjack
+installed as well that list grew by 40% and the two mods were the loudest thing on it.
+`ShowMenuButton` in the F12 menu brings it back; it is a patch applied once at load, so
+unlike `ShowTaskBarTab` it takes a restart. The code is kept rather than deleted --
+everything above about the leapfrog and the hole still applies the moment anybody turns
+it on.
+
 **The suit is chosen in `MenuIcon` and nowhere else, and that used to be two places.**
 `MenuButtonPatch` carried its own pasted copy of the icon routine, drawing a *diamond*
 and missing the `icon.color = Color.white` the shared one sets -- so the menu entry was
@@ -1297,10 +1307,11 @@ These were settled there against the real client and apply unchanged.
   have solved the camera and cursor problems for free, but the disc player needs
   Rest Space 2, a generator and burning fuel, which locks a new profile out of the
   mod entirely. It stays available as an optional second entrance later.
-- **The entry point is a button on `EFT.UI.MenuScreen`**, cloned from an existing
-  `DefaultUIButton` field. `Awake` and `Show` are the patch points, and the clone
-  happens at the **end of the frame** so it inherits whatever other menu mods did to
-  the button it copies.
+- ~~**The entry point is a button on `EFT.UI.MenuScreen`**~~ -- **the entry point is
+  the task-bar tab**, and the button is off by default. It is still there behind
+  `ShowMenuButton`, still cloned from an existing `DefaultUIButton` field, still patched
+  on `Awake` and `Show`, and the clone still happens at the **end of the frame** so it
+  inherits whatever other menu mods did to the button it copies. See "The task-bar tab".
 - **Guarding against play-in-raid is the mod's job.** Nothing enforces it.
 - **The panel floats over a dimmed hideout**, so freeing the cursor and swallowing
   player input is a hard requirement.
@@ -1432,13 +1443,13 @@ reads this first and would have started building one.
   two tabs do sit beside each other -- **seen on a screen at the home box**, which is
   also where the tab came out twice the width of the game's own. See "The pip is 160
   units wide".
-- **The main-menu button and the tab have been looked at**, and three things were
-  wrong with how they were drawn rather than with whether they worked: the pip was
-  sized from its own sprite rather than from the icon it replaced, which is what made
-  the tab too wide and the menu icon blow up on hover; the menu row had a hole in it
-  left by Blackjack leapfrogging past our first placement; and the menu pip was a
-  diamond from a stale copy of `MenuIcon` that could not be told from Blackjack's.
-  All three are fixed and deployed and **none of the fixes has been seen**.
+- **The tab is the only way in now**, and the main-menu button is off by default behind
+  `ShowMenuButton`. It works -- the sizing, the pip and the row spacing were all fixed
+  and seen correct on a screen first -- but a card game does not belong in a list of
+  five that reads ESCAPE FROM TARKOV, CHARACTER, TRADING, HIDEOUT, EXIT, and with
+  Blackjack alongside it grew by 40%.
+- **The table has been played and looks right**, and looking at it found three layout
+  faults -- see "The table was laid out against the picture". Fixed and **not yet seen**.
 - **Both halves are installed at `C:\HUH`, the server loads them, and `-PingOnly`
   passes.** Version gate, six routes, banner, session resolved, profile found, all six
   wallets read, no errors. That is the whole of what a headless server can confirm:
@@ -1450,28 +1461,27 @@ reads this first and would have started building one.
 
 ### What to check first at the home box
 
-**Both entrances have now been seen on a screen**, on the home box: the POKER button
-sits under EXIT on the main menu and the POKER tab sits beside MAIN MENU and HIDEOUT
-on the task bar, with Blackjack's alongside. Two rounds of fixes have come out of
-looking at them, and the second round is the one that mattered -- see "The pip is 160
-units wide". Everything from both is compiled and deployed and **has not itself been
-seen**.
+**Both entrances have been seen and both were fixed**, and the entrances are done: the
+tab sits beside MAIN MENU and HIDEOUT at the right size with the right pip, and the
+main-menu button is switched off. The table has been played, and the layout work that
+came out of looking at it is compiled, deployed and **not yet seen**.
 
 In rough order of how likely it is to be wrong:
 
-1. **The tab is the size of the tabs beside it.** POKER should be narrower than
-   HIDEOUT. `[Poker] tab, as laid out --` in the log gives the template's widths and
-   ours side by side if it is not; the number that matters is `Icon w=`, which should
-   now read 25 on both lines rather than 25 against 160.
-2. **The menu pip stays one pip on hover.** It was being magnified to its sprite's
-   native size the moment the hover state dirtied the layout, which showed as the icon
-   pulling apart into two.
-3. **EXIT, POKER and BLACKJACK are evenly spaced** on the main menu, with no gap where
-   Blackjack used to be.
-4. **The pot column, the close fade and the buy-in confirmation**, all unseen.
+1. **The community cards sit in the middle of the cloth**, with the pot below them and
+   a gap between the two.
+2. **No plaque overlaps the green.** The seats either side should sit clear of it; the
+   arithmetic says they clear by 12 at every seat count from two to five.
+3. **The player's cards, plaque and hand reading clear the status line and the
+   buttons.** That column had been running straight through both.
+4. **The card rows are evenly spaced** -- the gaps were being set by slots twice the
+   size of the cards in them.
 5. **Then, and only then, the money.** `-PingOnly` first, then one buy-in on the test
    profile with the console open. Every `InventoryHelper` call in `Bank` is still code
    that has never executed on a live server.
+
+`[Poker] tab, as laid out --` is still in the log if the tab ever looks wrong again; it
+prints the template's geometry and ours side by side.
 
 ### Open items
 
