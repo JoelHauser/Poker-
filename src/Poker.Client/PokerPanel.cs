@@ -453,13 +453,21 @@ namespace Poker.Client
                 .Where(s => ((int?)s["Won"] ?? 0) > 0)
                 .Select(s =>
                 {
-                    var name = (bool?)s["IsPlayer"] == true ? "You" : (string)s["Name"] ?? "A seat";
+                    var isPlayer = (bool?)s["IsPlayer"] == true;
+                    var name = isPlayer ? "You" : (string)s["Name"] ?? "A seat";
+
+                    // "You wins". The seat's name is a third person and the player is a
+                    // second, so the verb cannot be part of the sentence's fixed half --
+                    // which is what it was, and it read as broken English on every pot
+                    // the player took.
+                    var verb = isPlayer ? "win" : "wins";
+
                     var won = (int?)s["Won"] ?? 0;
                     var hand = (string)s["Hand"];
 
                     return hand == null
-                        ? $"{name} wins {won:N0}"
-                        : $"{name} wins {won:N0} with {hand.ToLowerInvariant()}";
+                        ? $"{name} {verb} {won:N0}"
+                        : $"{name} {verb} {won:N0} with {hand.ToLowerInvariant()}";
                 })
                 .ToArray();
 
