@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using UnityEngine;
 using UnityEngine.UI;
@@ -6,10 +6,12 @@ using UnityEngine.UI;
 namespace Poker.Client
 {
     /// <summary>
-    /// Puts a card suit on a button cloned from one of EFT's own.
+    /// Puts a card suit on the task-bar tab, which is a clone of one of the game's own
+    /// and therefore arrives wearing somebody else's icon.
     ///
-    /// Shared by the main-menu button and the task-bar tab, because both are copies of
-    /// a neighbour and both therefore arrive wearing somebody else's icon.
+    /// It used to serve a main-menu button as well; that entrance has been removed, and
+    /// the defensive shape and size handling below is written as if there were still two
+    /// callers because it was two callers that found every bug in it.
     ///
     /// Ported from Blackjack, with one deliberate difference: **a spade, not a
     /// diamond.** The two mods sit on the same bar and the labels are the same size in
@@ -22,13 +24,11 @@ namespace Poker.Client
     internal static class MenuIcon
     {
         /// <summary>
-        /// The mod's suit, chosen in one place.
+        /// The mod's suit.
         ///
-        /// It was chosen in two, and they disagreed: the tab drew a spade and the menu
-        /// button drew a diamond from a copy of this file that had been pasted into
-        /// MenuButtonPatch and then never kept up. The menu entry was therefore
-        /// indistinguishable from Blackjack's at a glance, which is the exact thing the
-        /// spade exists to prevent.
+        /// A spade rather than Blackjack's diamond, because the two tabs sit side by side
+        /// on the same bar with the same label in the same colour, and the pip is the only
+        /// thing telling them apart at a glance.
         /// </summary>
         private const char Pip = 'S';
 

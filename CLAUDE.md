@@ -106,7 +106,7 @@ means the gate, not a bug in the game code.
 | `tests/Poker.Server.Tests` | 21 tests over the money and both transports, on fakes. No SPT server needed. |
 | `tests/Poker.Game.Tests` | 189 tests. The evaluator, pot builder, log, hold'em table and bots are live; the paytables, UTH table and strategy are parked. |
 | `src/Poker.Server` | The mod: routes, DI, logging, and the money. |
-| `src/Poker.Client` | The BepInEx half: menu button, table panel, card and chip art. `net472`, built against the install. |
+| `src/Poker.Client` | The BepInEx half: task-bar tab, table panel, card and chip art. `net472`, built against the install. |
 | `tools/Poker.Console` | Terminal table and soak harness. No SPT needed. See "The harness". |
 | `scripts/` | `pack-mod.ps1` builds the droppable zip, `pack-console.ps1` the harness, `smoke.ps1` drives a real server. |
 
@@ -724,7 +724,12 @@ redraws rather than arguing.
 **The reveal rule is the server's.** Draw `Cards` exactly as sent; an empty list
 means backs. `HoldemView.Of` keys it off the seat having reached a showdown.
 
-### Two things the menu will do to you
+### Two things the menu did to you, while there was a menu button
+
+**History.** `MenuButtonPatch` has been deleted and the tab is the only entrance;
+none of this is live code any more. It is kept because both lessons are about
+EFT and about sharing a menu with another mod, not about the button, and the next
+thing that clones a menu row will meet them again.
 
 - **The button walks down the screen.** `MenuButtonPatch` installs on both `Awake`
   and `Show`, and placement measured against the lowest button while excluding only
@@ -809,19 +814,19 @@ Two things added here on top of the port:
 - **`IsAnotherModsTab()`** guards the degraded fallback path, so we cannot clone the
   other mod's tab even if the keyed lookup fails.
 
-The tab and the main-menu button are independent on purpose: the button is a Harmony
-patch inside a `try`, so a patch that will not apply on some future build costs the
-button and leaves the tab, which is the better of the two anyway.
+**The tab is the only way in, and `MenuButtonPatch` is gone.** There was a main-menu
+button as well, cloned onto `EFT.UI.MenuScreen`. It was the weaker entrance twice over:
+it existed only on the main menu, where the tab is on every out-of-raid screen, and it
+added a card game to a list of five reading ESCAPE FROM TARKOV, CHARACTER, TRADING,
+HIDEOUT, EXIT -- with Blackjack installed as well that list grew by 40% and the two mods
+were the loudest thing on it.
 
-**The tab is now the only way in, and the main-menu button is off by default.** Seen
-side by side, the button was the weaker entrance twice over: it exists only on the main
-menu, where the tab is on every out-of-raid screen, and it adds a card game to a list of
-five that reads ESCAPE FROM TARKOV, CHARACTER, TRADING, HIDEOUT, EXIT. With Blackjack
-installed as well that list grew by 40% and the two mods were the loudest thing on it.
-`ShowMenuButton` in the F12 menu brings it back; it is a patch applied once at load, so
-unlike `ShowTaskBarTab` it takes a restart. The code is kept rather than deleted --
-everything above about the leapfrog and the hole still applies the moment anybody turns
-it on.
+It was switched off behind an F12 setting first, and that was the wrong shape of answer:
+a setting is a promise that turning it on works, and this one had never been exercised
+since it was disabled. **A dead option is worse than no option**, so the setting, the
+patch and the file went together. The history is still worth reading in git -- the
+leapfrog, the hole it left behind, and `MenuScreen`'s own `_playButton` / `_hideoutButton`
+fields -- if a second entrance is ever wanted again.
 
 **The suit is chosen in `MenuIcon` and nowhere else, and that used to be two places.**
 `MenuButtonPatch` carried its own pasted copy of the icon routine, drawing a *diamond*
@@ -1368,10 +1373,7 @@ These were settled there against the real client and apply unchanged.
   Rest Space 2, a generator and burning fuel, which locks a new profile out of the
   mod entirely. It stays available as an optional second entrance later.
 - ~~**The entry point is a button on `EFT.UI.MenuScreen`**~~ -- **the entry point is
-  the task-bar tab**, and the button is off by default. It is still there behind
-  `ShowMenuButton`, still cloned from an existing `DefaultUIButton` field, still patched
-  on `Awake` and `Show`, and the clone still happens at the **end of the frame** so it
-  inherits whatever other menu mods did to the button it copies. See "The task-bar tab".
+  the task-bar tab, and the button has been removed entirely.** See "The task-bar tab".
 - **Guarding against play-in-raid is the mod's job.** Nothing enforces it.
 - **The panel floats over a dimmed hideout**, so freeing the cursor and swallowing
   player input is a hard requirement.
@@ -1503,11 +1505,8 @@ reads this first and would have started building one.
   two tabs do sit beside each other -- **seen on a screen at the home box**, which is
   also where the tab came out twice the width of the game's own. See "The pip is 160
   units wide".
-- **The tab is the only way in now**, and the main-menu button is off by default behind
-  `ShowMenuButton`. It works -- the sizing, the pip and the row spacing were all fixed
-  and seen correct on a screen first -- but a card game does not belong in a list of
-  five that reads ESCAPE FROM TARKOV, CHARACTER, TRADING, HIDEOUT, EXIT, and with
-  Blackjack alongside it grew by 40%.
+- **The tab is the only way in**, and `MenuButtonPatch` has been deleted along with the
+  F12 setting that had been hiding it. See "The task-bar tab".
 - **The table has been played and looks right**, and looking at it found three layout
   faults -- see "The table was laid out against the picture". Fixed and **not yet seen**.
 - **Both halves are installed at `C:\HUH`, the server loads them, and `-PingOnly`
@@ -1523,7 +1522,7 @@ reads this first and would have started building one.
 
 **Both entrances have been seen and both were fixed**, and the entrances are done: the
 tab sits beside MAIN MENU and HIDEOUT at the right size with the right pip, and the
-main-menu button is switched off. The table has been played, and the layout work that
+main-menu button is gone. The table has been played, and the layout work that
 came out of looking at it is compiled, deployed and **not yet seen**.
 
 In rough order of how likely it is to be wrong:
@@ -1630,5 +1629,5 @@ prints the template's geometry and ours side by side.
 
 **Outside this repo**
 
-- **Blackjack's menu button still leapfrogs.** The same five-line fix applies; see
-  "Two things the menu will do to you".
+- ~~**Blackjack's menu button still leapfrogs.**~~ Moot: both mods' main-menu buttons
+  have been removed, and the tab is the only entrance in either.
