@@ -270,62 +270,71 @@ namespace Poker.Client
         /// part of it that shows, so the row is much narrower than the count suggests.
         /// </summary>
         /// <summary>
-        /// A pile of chips on the felt in front of a seat, wide when the seat is rich
-        /// and nearly bare when it is almost out.
+        /// A player's chips on the felt: a few separate stacks side by side, more of
+        /// them the richer the seat is.
         ///
         /// **Deliberately not a `Breakdown`, and this is the one place the two part
         /// company.** A breakdown answers "which chips make this amount", and it answers
         /// it in very few chips: 765,000 is a 500k, two 100ks, a 50k and a 10k -- five
         /// discs. So is 1,200,000, and so is 250,000. Exact, and useless as a picture,
         /// because the pile a player is meant to read at a glance would barely move
-        /// between a short stack and a big one.
+        /// between a short stack and a big one. The disc **count** carries the amount
+        /// instead, one per <paramref name="slice"/>, and the face is the largest
+        /// denomination that slice will buy -- so every disc is worth the same, which is
+        /// what a rack in front of a player looks like anyway.
         ///
-        /// A pile answers a different question -- "how much has that seat got" -- so the
-        /// disc **count** is what carries the amount, one per <paramref name="slice"/>.
-        /// The face is the largest denomination that slice will buy, so the pile is still
-        /// made of real chips rather than tokens, and every disc in it is worth the same
-        /// -- which is what a rack in front of a player looks like anyway. The exact
-        /// figure is on the plaque a few pixels away. A live seat holding less than one
-        /// slice still gets a single disc: a player who is still in the hand should not
-        /// have an empty spot on the felt, and a busted one should.
+        /// **Two earlier attempts got the arrangement wrong, and both for the same
+        /// reason: this table is photographed from directly above.**
         ///
-        /// **Laid flat, in overlapping rows, and not in vertical stacks.** The first
-        /// attempt built columns of discs overlapped by three quarters, on the reasoning
-        /// that a rack is read by its height. It came out as a green ladder, and the
-        /// reason is the artwork: these chips are drawn **face on, from directly above**,
-        /// so all a three-quarter overlap leaves of each one is a crescent of its rim.
-        /// The table is photographed from above too, and from there a stack of chips is
-        /// one disc -- so height is exactly what this view cannot show. Spreading them
-        /// across the felt is what a top-down table does instead, and it grows and
-        /// shrinks just as legibly. The overlap is the pot's, which already reads right.
+        /// - Tall columns overlapped by three quarters came out as a ladder of green
+        ///   crescents. The chips are drawn face on, so a heavy overlap leaves nothing of
+        ///   each one but a sliver of rim -- and from this camera a stack of chips is one
+        ///   disc anyway. Height is the thing the view cannot show.
+        /// - Centred rows of four came out as a green pyramid, because each row is
+        ///   narrower than the one below and all of them are centred. Nothing on a card
+        ///   table is stacked in a triangle.
+        ///
+        /// What a player's chips actually look like from above is **a short row of
+        /// circles** -- the tops of two or three or five stacks, standing side by side
+        /// with the felt showing between them. So that is what this draws: stacks are
+        /// laid out along a line with a gap between them, filled left to right and left
+        /// deliberately uneven, because real stacks never come out level. Within a stack
+        /// the discs are offset by a fraction of their size, which is the rim of the ones
+        /// underneath showing past the top chip -- the only honest way to suggest height
+        /// from overhead, and the reason it reads as a stack rather than a token.
+        ///
+        /// The caller rotates the whole thing to lie along the rail. See
+        /// PokerPanel.RackPosition.
         /// </summary>
         internal static GameObject Rack(
             Transform parent,
             int amount,
             int slice,
-            float size = 24f,
-            int perRow = 4,
-            int maxRows = 4)
+            float size = 20f,
+            int perStack = 5,
+            int maxStacks = 4)
         {
             var go = new GameObject("Rack", typeof(RectTransform));
             go.transform.SetParent(parent, false);
 
-            // Sized to the largest pile it could hold, rather than left at zero. A
-            // layout group on a rect with no size has nothing to align its children
-            // within, so the rows would sit wherever the group happened to put them and
-            // the pile would shift about as it grew.
-            var rowLift = size * RowOverlap;
+            // Sized to the largest pile it could hold, rather than left at zero. A layout
+            // group on a rect with no size has nothing to align its children within, so
+            // the stacks would sit wherever the group happened to put them and the pile
+            // would shift about as it grew.
             ((RectTransform)go.transform).sizeDelta = new Vector2(
-                RowWidth(perRow, size),
-                size + ((maxRows - 1) * rowLift));
+                (maxStacks * size) + ((maxStacks - 1) * (size * StackGap)),
+                StackHeight(perStack, size));
 
-            var column = go.AddComponent<VerticalLayoutGroup>();
-            column.spacing = -(size - rowLift);
-            column.childAlignment = TextAnchor.LowerCenter;
-            column.childForceExpandWidth = false;
-            column.childForceExpandHeight = false;
-            column.childControlWidth = false;
-            column.childControlHeight = false;
+            var line = go.AddComponent<HorizontalLayoutGroup>();
+
+            // A real gap. Overlapping stacks is what made the last two attempts read as
+            // one green mass rather than as somebody's chips.
+            line.spacing = size * StackGap;
+            line.childAlignment = TextAnchor.LowerLeft;
+            line.childForceExpandWidth = false;
+            line.childForceExpandHeight = false;
+            line.childControlWidth = false;
+            line.childControlHeight = false;
 
             if (amount <= 0 || slice <= 0)
             {
@@ -341,40 +350,48 @@ namespace Poker.Client
             var discs = Mathf.Clamp(
                 Mathf.Max(1, Mathf.RoundToInt(amount / (float)slice)),
                 1,
-                perRow * maxRows);
+                perStack * maxStacks);
 
+            // Filled a stack at a time rather than levelled across all of them, so the
+            // last one is short and the pile looks counted out instead of arranged.
             for (var placed = 0; placed < discs;)
             {
-                var width = Mathf.Min(perRow, discs - placed);
-                Row(go.transform, face, width, size);
-                placed += width;
+                var height = Mathf.Min(perStack, discs - placed);
+                Stack(go.transform, face, height, size);
+                placed += height;
             }
 
             return go;
         }
 
-        /// <summary>How much of a disc the row above it leaves showing.</summary>
-        private const float RowOverlap = 0.46f;
+        /// <summary>The gap between stacks, as a fraction of a chip. Felt has to show.</summary>
+        private const float StackGap = 0.22f;
 
-        /// <summary>One row of overlapping discs, at the same overlap the pot uses.</summary>
-        private static void Row(Transform parent, Sprite face, int width, float size)
+        /// <summary>
+        /// How much of each disc shows past the one above it. Small: this is the rim of a
+        /// chip seen from nearly overhead, not a step on a staircase.
+        /// </summary>
+        private const float Rim = 0.16f;
+
+        /// <summary>One stack, seen from above: a top chip and the rims below it.</summary>
+        private static void Stack(Transform parent, Sprite face, int height, float size)
         {
-            var row = new GameObject("Row", typeof(RectTransform));
-            row.transform.SetParent(parent, false);
-            ((RectTransform)row.transform).sizeDelta = new Vector2(RowWidth(width, size), size);
+            var stack = new GameObject("Stack", typeof(RectTransform));
+            stack.transform.SetParent(parent, false);
+            ((RectTransform)stack.transform).sizeDelta = new Vector2(size, StackHeight(height, size));
 
-            var line = row.AddComponent<HorizontalLayoutGroup>();
-            line.spacing = -size * 0.42f;
-            line.childAlignment = TextAnchor.MiddleCenter;
-            line.childForceExpandWidth = false;
-            line.childForceExpandHeight = false;
-            line.childControlWidth = false;
-            line.childControlHeight = false;
+            var column = stack.AddComponent<VerticalLayoutGroup>();
+            column.spacing = -(size * (1f - Rim));
+            column.childAlignment = TextAnchor.LowerCenter;
+            column.childForceExpandWidth = false;
+            column.childForceExpandHeight = false;
+            column.childControlWidth = false;
+            column.childControlHeight = false;
 
-            for (var i = 0; i < width; i++)
+            for (var i = 0; i < height; i++)
             {
                 var disc = new GameObject("Disc", typeof(RectTransform), typeof(Image));
-                disc.transform.SetParent(row.transform, false);
+                disc.transform.SetParent(stack.transform, false);
                 ((RectTransform)disc.transform).sizeDelta = new Vector2(size, size);
 
                 var image = disc.GetComponent<Image>();
@@ -384,8 +401,8 @@ namespace Poker.Client
             }
         }
 
-        private static float RowWidth(int discs, float size) =>
-            (discs * size) - (Mathf.Max(0, discs - 1) * size * 0.42f);
+        private static float StackHeight(int discs, float size) =>
+            size + (Mathf.Max(0, discs - 1) * size * Rim);
 
         /// <summary>
         /// The chip a slice is drawn as: the largest denomination it will buy, so the

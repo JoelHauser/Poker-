@@ -1063,15 +1063,35 @@ pile is still made of real chips. Every disc is worth the same, which is what a 
 front of a player looks like anyway. The exact figure is on the plaque a few pixels
 away. Tied to the blinds rather than to the buy-in so it survives a change of stakes.
 
-**The chips lie flat in overlapping rows. They are not stacked, and they cannot be.**
-The first attempt built vertical columns overlapped by three quarters, reasoning that a
-rack is read by its height. On screen it was a green ladder. The artwork is why: the
-chips are drawn **face on, from directly above**, so a three-quarter overlap leaves
-nothing of each one but a crescent of rim. The table is photographed from above too, and
-**from that camera a stack of chips is one disc** -- height is the one thing this view
-cannot show. Spreading them across the felt is what a top-down table does instead, and it
-grows and shrinks just as legibly. The horizontal overlap is the pot's, which already
-reads correctly.
+**The arrangement was wrong twice, both times for the same reason: this table is
+photographed from directly above.**
+
+- **Tall columns overlapped by three quarters** came out as a ladder of green crescents.
+  The chips are drawn face on, so a heavy overlap leaves nothing of each one but a
+  sliver of rim -- and from this camera a stack of chips is one disc anyway. Height is
+  the thing the view cannot show.
+- **Centred rows of four** came out as a green pyramid, because each row is narrower
+  than the one below and every one of them is centred. Nothing on a card table is
+  stacked in a triangle.
+
+What a player's chips look like from overhead is **a short row of circles**: the tops of
+two or three or five stacks, standing side by side with felt showing between them. So
+stacks are laid out along a line with a real gap between them, filled one at a time
+rather than levelled, because real stacks are never even. Within a stack the discs are
+offset by `Rim` -- a sixth of a chip -- which is the edge of the ones underneath showing
+past the top one, and the only honest way to suggest height from above.
+
+**The row is turned to lie along the rail.** `SeatAngle` is shared by the seat, its
+chips and their rotation, so a player's chips run parallel to the edge they are sitting
+at rather than left-to-right wherever they happen to be. The discs are circles, so
+rotating the row costs them nothing.
+
+**They sit at `RackRadius` 0.86 of the cloth, out at the player's edge.** The middle of
+the table is the board and the pot; chips near it read as clutter. That number is not a
+guess -- at 0.9 the furthest chip's edge lands 2% past the cloth and onto the rail.
+**Check the chips, not the bounding box:** the pile is a rotated rectangle whose corners
+poke outside the ellipse at any radius, while the round chips inside it are comfortably
+in. Testing the box says this is impossible; testing the discs says 0.86.
 
 - **A live seat under one slice still gets a disc**, and a busted one gets none. An
   empty spot in front of somebody still in the hand reads as a bug.

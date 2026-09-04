@@ -75,12 +75,13 @@ namespace Poker.Client
         /// <summary>
         /// How far out on the cloth a seat's chips sit, as a fraction of its radius.
         ///
-        /// Far enough out to be that seat's own corner of the felt rather than part of
-        /// the pot, and far enough in to stay clear of the rail. It is the same
-        /// direction the seat itself was placed along, so the chips are always directly
-        /// in front of the person they belong to however many are at the table.
+        /// Chips belong at the player's edge of the table, not scattered around the
+        /// middle of it -- the middle is the board and the pot. Far enough out to be
+        /// that seat's own corner of the felt, far enough in to stay off the rail. It is
+        /// the same direction the seat itself was placed along, so the chips are always
+        /// directly in front of the person they belong to however many are at the table.
         /// </summary>
-        private const float RackRadius = 0.78f;
+        private const float RackRadius = 0.86f;
 
         /// <summary>
         /// What one disc in a seat's rack is worth: five big blinds.
@@ -764,8 +765,14 @@ namespace Poker.Client
             var holder = NewBox("Rack" + index, _rackLayer, Color.clear);
             holder.anchorMin = holder.anchorMax = new Vector2(0.5f, 0.5f);
             holder.pivot = new Vector2(0.5f, 0.5f);
-            holder.sizeDelta = new Vector2(90f, 70f);
+            holder.sizeDelta = new Vector2(110f, 110f);
             holder.anchoredPosition = RackPosition(index, total);
+
+            // Turned to lie along the rail in front of its seat, the way a player's
+            // chips sit on a real table -- a line parallel to the edge they are sitting
+            // at, not one that happens to run left to right wherever they are. The discs
+            // are circles, so rotating the row costs them nothing.
+            holder.localRotation = Quaternion.Euler(0f, 0f, SeatAngle(index, total) + 90f);
 
             ChipView.Rack(holder, stack, ChipsPerDisc);
         }
@@ -781,13 +788,20 @@ namespace Poker.Client
         /// </summary>
         private static Vector2 RackPosition(int index, int total)
         {
-            var degrees = total <= 1 ? -90f : -90f - (index * (360f / total));
-            var radians = degrees * Mathf.Deg2Rad;
+            var radians = SeatAngle(index, total) * Mathf.Deg2Rad;
 
             return new Vector2(
                 Mathf.Cos(radians) * ClothX * RackRadius,
                 ClothCentreY + (Mathf.Sin(radians) * ClothY * RackRadius));
         }
+
+        /// <summary>
+        /// The direction a seat lies in from the middle of the table. Shared by the seat
+        /// itself, its chips and the way those chips are turned, so the three cannot
+        /// drift apart.
+        /// </summary>
+        private static float SeatAngle(int index, int total) =>
+            total <= 1 ? -90f : -90f - (index * (360f / total));
 
         /// <summary>
         /// Where a seat sits: out along its own direction until its plaque is clear of
@@ -816,8 +830,7 @@ namespace Poker.Client
         /// </summary>
         private static Vector2 SeatPosition(int index, int total, bool isPlayer)
         {
-            var degrees = total <= 1 ? -90f : -90f - (index * (360f / total));
-            var radians = degrees * Mathf.Deg2Rad;
+            var radians = SeatAngle(index, total) * Mathf.Deg2Rad;
 
             var dx = Mathf.Cos(radians);
             var dy = Mathf.Sin(radians);
