@@ -816,6 +816,25 @@ Two things added here on top of the port:
 - **`IsAnotherModsTab()`** guards the degraded fallback path, so we cannot clone the
   other mod's tab even if the keyed lookup fails.
 
+**The tab dims with the row, and the toggle is the wrong thing to read.** MenuTaskBar
+locks the bar for a raid through `SetButtonsInteractable(false, NOT_AVAILABLE_IN_RAID)`,
+which reaches `HoverTooltipArea.SetUnlockStatus` and ends in
+`MyExtensions.SetUnlockStatus(CanvasGroup, bool, bool)` -- and that sets the **wrapper's
+CanvasGroup** to alpha 0.3 and `interactable` false. It never touches
+`Toggle.interactable`, which is the serialized field `PokerTabClick.Mirror` used to
+read, so the mirror reported "live" and our tab stayed lit beside a row of grey ones
+while a raid loaded. `MirrorGroup` is that CanvasGroup and is the signal that actually
+moves; `Toggle.IsInteractable()` -- the method, not the field -- is the fallback.
+
+`LockedAlpha` is 0.3 because that is the literal in `SetUnlockStatus`, so ours greys to
+exactly the row's shade rather than nearly it. `TaskBarTab.InRaid` is checked first and
+on its own: the table is closed at the first hint of a raid and a tab still lit at that
+moment invites a click going nowhere, so that must not depend on the bar having dimmed
+itself. The hover highlight is switched off with it, because the pointer can already be
+resting on the tab when it locks and the exit handler will not fire.
+
+**Blackjack found this one first**, and it is in both mods now.
+
 **The tab is the only way in, and `MenuButtonPatch` is gone.** There was a main-menu
 button as well, cloned onto `EFT.UI.MenuScreen`. It was the weaker entrance twice over:
 it existed only on the main menu, where the tab is on every out-of-raid screen, and it
