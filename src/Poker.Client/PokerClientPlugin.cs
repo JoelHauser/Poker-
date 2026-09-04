@@ -25,7 +25,7 @@ namespace Poker.Client
         // so the two identifiers never meet and there is nothing to collide with.
         public const string PluginGuid = "com.mybutthasarash.poker";
         public const string PluginName = "Poker";
-        public const string PluginVersion = "1.0.0";
+        public const string PluginVersion = "1.0.1";
 
         internal static ManualLogSource Log;
 
