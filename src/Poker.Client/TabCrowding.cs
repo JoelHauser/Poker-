@@ -1,6 +1,6 @@
-using System;
 using System.Collections.Generic;
 using System.Linq;
+using EFT.UI;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -12,56 +12,57 @@ namespace Poker.Client
     ///
     /// ## The bug this exists for
     ///
-    /// The bar sizes its tabs from their contents and then squeezes them all when the
-    /// row is over-subscribed. Past a certain number of tabs every label in the row
-    /// starts wrapping mid-word -- HIDEOU/T, CHARACTE/R, BLACKJAC/K -- and the bar
-    /// becomes unreadable. It takes about four mod-added tabs to get there: Raid
-    /// Review's optional menu item, PIT Fireteam's slots, and one each from Blackjack
-    /// and Poker.
+    /// The bar sizes its tabs from their contents and squeezes them all when the row is
+    /// over-subscribed. Past about four mod-added tabs every label starts breaking
+    /// mid-word -- HIDEOU/T, CHARACTE/R, BLACKJAC/K -- and the bar becomes unreadable.
+    /// It takes Raid Review's optional menu item, PIT Fireteam's slots and one tab each
+    /// from Blackjack, Poker and Roulette to get there.
     ///
     /// **We are guests on that row, so we are the ones who give way.** When the bar is
-    /// tight this drops our label and leaves the pip, which takes our tab from about
-    /// 112 units to about 40 and hands the difference back to the game's own tabs. When
-    /// there is room again it takes the label back.
+    /// tight this drops our label and leaves the pip, taking our tab from about 112
+    /// units to about 40 and handing the difference back. When there is room again it
+    /// takes the label back.
     ///
-    /// It cannot fix the row on its own and does not pretend to: two tabs going compact
-    /// frees perhaps 145 units of 1920, which is worth having and is not a whole
-    /// answer. What it does guarantee is that these two mods are no longer part of the
-    /// problem.
+    /// It cannot fix the row alone and does not pretend to. What it guarantees is that
+    /// this mod is no longer part of the problem.
     ///
-    /// ## Why it is measured rather than counted
+    /// ## Measuring widths did not work, and this is why
     ///
-    /// Counting tabs would need a number to compare against, and that number depends on
-    /// the resolution, the UI scale, how long the other mods' labels are and what the
-    /// game itself put on the row this patch. Measuring asks the question that actually
-    /// matters -- is anything being squeezed below what it asked for -- and gets it
-    /// right at any resolution without knowing what else is installed.
+    /// The first attempt asked whether any label was narrower than
+    /// `GetPreferredValues` said it wanted. **It never fired once.** TextMeshPro does
+    /// not sit at its preferred width and overflow -- it *wraps*, and once it has
+    /// wrapped, the width it reports wanting is the width it has. Preferred and actual
+    /// agree exactly at the moment the label is at its most broken.
+    ///
+    /// So ask the question the eye is actually asking: **is a single word being split
+    /// across two lines?** `HIDEOUT` on two lines is a bar out of room, and no amount
+    /// of width arithmetic was needed to see it. Labels of two or more words are
+    /// skipped, because MAIN MENU and FLEA MARKET sit on two lines when the row is
+    /// perfectly healthy -- counting those would have the tab permanently compact.
     /// </summary>
     internal static class TabCrowding
     {
-        /// <summary>
-        /// How far below its preferred width a label has to be squeezed before it
-        /// counts. A couple of units is rounding; ten means it is wrapping.
-        /// </summary>
-        private const float SqueezeTolerance = 10f;
-
-        /// <summary>
-        /// How much more room than our label needs before we take it back. Expanding
-        /// costs exactly what collapsing saved, so without a margin the row would sit
-        /// on the boundary and flip once a second forever.
-        /// </summary>
-        private const float ExpandMargin = 1.35f;
-
         private static bool _compact;
         private static bool _announced;
 
-        // What Relabel worked out for the full-width tab, kept so it can be restored
-        // rather than recomputed -- recomputing it while the label is hidden measures
-        // an empty string.
-        private static float _fullPreferred;
-        private static float _fullMin;
-        private static float _labelWidth;
-        private static bool _measured;
+        /// <summary>
+        /// Set when taking the label back immediately made the row wrap again.
+        ///
+        /// Expanding costs exactly what collapsing saved, so on a row that is full to
+        /// the pixel the two states would alternate once a second forever. Once that
+        /// has been seen, no further attempt is made until the row itself changes.
+        /// </summary>
+        private static bool _expandBlocked;
+
+        /// <summary>
+        /// What the bar looked like when we last decided. A change in the number of
+        /// tabs, or in the resolution, is the only thing that makes it worth trying to
+        /// expand again.
+        /// </summary>
+        private static int _rowSignature;
+
+        private static bool _justExpanded;
+        private static bool _censused;
 
         internal static bool IsCompact => _compact;
 
@@ -69,16 +70,19 @@ namespace Poker.Client
         internal static void Forget()
         {
             _compact = false;
-            _measured = false;
             _announced = false;
+            _expandBlocked = false;
+            _justExpanded = false;
+            _rowSignature = 0;
+            _censused = false;
         }
 
         /// <summary>
         /// Decides whether our tab should be wearing its label, and applies it.
         ///
-        /// Runs on the tab's own once-a-second heartbeat, so it follows the row as
-        /// other mods add and remove tabs and as the resolution changes, without
-        /// watching for either.
+        /// Runs on the tab's own once-a-second heartbeat, so it follows the row as other
+        /// mods add and remove tabs and as the resolution changes, without watching for
+        /// either.
         /// </summary>
         internal static void Apply(GameObject tab)
         {
@@ -88,158 +92,102 @@ namespace Poker.Client
             }
 
             var label = OurLabel(tab);
-            var row = tab.transform.parent;
-
-            if (label == null || row == null)
+            if (label == null)
             {
                 return;
             }
 
-            Measure(tab, label);
+            var labels = BarLabels(tab).ToList();
 
-            var squeezed = Squeezed(row, tab);
+            Census(labels);
 
-            if (!_compact && squeezed)
+            var signature = Signature(labels);
+
+            // The row changed under us, so whatever we concluded last time was about a
+            // different bar.
+            if (signature != _rowSignature)
             {
-                Set(tab, label, compact: true);
+                _rowSignature = signature;
+                _expandBlocked = false;
+            }
+
+            var squeezed = Squeezed(labels, tab);
+
+            if (squeezed)
+            {
+                // Taking the label back is what broke it, so stop trying until the row
+                // changes shape.
+                if (_justExpanded)
+                {
+                    _expandBlocked = true;
+                }
+
+                _justExpanded = false;
+
+                if (!_compact)
+                {
+                    Set(tab, label, compact: true);
+                }
+
                 return;
             }
 
-            if (_compact && !squeezed && Fits(row))
+            _justExpanded = false;
+
+            if (_compact && !_expandBlocked)
             {
                 Set(tab, label, compact: false);
+                _justExpanded = true;
             }
         }
 
         /// <summary>
-        /// Is anything on the row narrower than it asked to be?
+        /// Is a single word being broken across lines anywhere on the bar?
         ///
-        /// Our own tab is skipped: once it is compact its label is off, so it is never
-        /// squeezed, and letting it vote would mean the row looked healthier simply
+        /// Our own tab is skipped: once it is compact its label is off, so it can never
+        /// be squeezed, and letting it vote would mean the row looked healthy precisely
         /// because we had already given way.
         /// </summary>
-        private static bool Squeezed(Transform row, GameObject ours)
+        private static bool Squeezed(IEnumerable<TextMeshProUGUI> labels, GameObject ours) =>
+            labels.Any(label => !label.transform.IsChildOf(ours.transform) && Broken(label));
+
+        private static bool Broken(TextMeshProUGUI label)
         {
-            foreach (var label in Labels(row))
+            var text = label.text;
+
+            if (string.IsNullOrWhiteSpace(text) || !label.isActiveAndEnabled)
             {
-                if (label.transform.IsChildOf(ours.transform))
-                {
-                    continue;
-                }
-
-                if (string.IsNullOrWhiteSpace(label.text) || !label.isActiveAndEnabled)
-                {
-                    continue;
-                }
-
-                var wanted = label.GetPreferredValues(label.text).x;
-
-                if (wanted - label.rectTransform.rect.width > SqueezeTolerance)
-                {
-                    return true;
-                }
+                return false;
             }
 
-            return false;
-        }
-
-        /// <summary>
-        /// Is there room to put our label back?
-        ///
-        /// Nothing being squeezed is not the same as there being spare room -- the row
-        /// can be exactly full. This asks for our label's width plus a margin of
-        /// genuine slack before expanding, which is what stops the two states
-        /// alternating on the heartbeat.
-        /// </summary>
-        private static bool Fits(Transform row)
-        {
-            var container = row as RectTransform;
-
-            if (container == null || _labelWidth <= 0f)
+            // Two words are allowed two lines. MAIN MENU and FLEA MARKET are on two
+            // lines when nothing at all is wrong.
+            if (text.Trim().Contains(' '))
             {
-                return true;
+                return false;
             }
 
-            var used = 0f;
+            var info = label.textInfo;
 
-            for (var i = 0; i < container.childCount; i++)
-            {
-                var child = container.GetChild(i) as RectTransform;
-
-                if (child != null && child.gameObject.activeSelf)
-                {
-                    used += LayoutUtility.GetPreferredWidth(child);
-                }
-            }
-
-            var group = container.GetComponent<HorizontalLayoutGroup>();
-
-            if (group != null)
-            {
-                used += group.spacing * Mathf.Max(0, container.childCount - 1);
-                used += group.padding.left + group.padding.right;
-            }
-
-            return container.rect.width - used >= _labelWidth * ExpandMargin;
-        }
-
-        /// <summary>
-        /// Records the full-width numbers once, while the tab is still wearing its
-        /// label. Everything after this is a restore rather than a recalculation.
-        /// </summary>
-        private static void Measure(GameObject tab, TextMeshProUGUI label)
-        {
-            if (_measured || _compact)
-            {
-                return;
-            }
-
-            _labelWidth = label.GetPreferredValues(label.text).x;
-
-            var hint = label.GetComponentInParent<LayoutElement>();
-
-            if (hint != null)
-            {
-                _fullPreferred = hint.preferredWidth;
-                _fullMin = hint.minWidth;
-            }
-
-            _measured = true;
+            return info != null && info.characterCount > 0 && info.lineCount > 1;
         }
 
         private static void Set(GameObject tab, TextMeshProUGUI label, bool compact)
         {
             label.enabled = !compact;
 
-            var hint = label.GetComponentInParent<LayoutElement>();
-
-            if (hint != null)
-            {
-                // The tab still has to be wide enough for the pip and its padding. That
-                // is the tab's width less the label's, which is the same "chrome"
-                // Relabel measures off the template.
-                var chrome = Mathf.Max(0f, _fullPreferred - _labelWidth);
-
-                if (_fullPreferred > 0f)
-                {
-                    hint.preferredWidth = compact ? Mathf.Max(chrome, 36f) : _fullPreferred;
-                }
-
-                if (_fullMin > 0f)
-                {
-                    hint.minWidth = compact ? Mathf.Max(chrome, 36f) : _fullMin;
-                }
-            }
-
+            // The tab measures itself from its contents, so switching the label off is
+            // enough to shrink it -- but only once something asks for the measurement
+            // again.
             LayoutRebuilder.MarkLayoutForRebuild((RectTransform)tab.transform);
 
             _compact = compact;
 
-            // Said once rather than every second, and worth saying at all: a tab that
-            // has quietly dropped its own name is otherwise a mystery to whoever is
-            // looking at the bar wondering where POKER went.
             if (compact && !_announced)
             {
+                // Said once rather than every second, and worth saying at all: a tab
+                // that has quietly dropped its own name is otherwise a mystery to
+                // whoever is looking at the bar wondering where POKER went.
                 PokerClientPlugin.Log.LogInfo(
                     "[Poker] the task bar is crowded, so the tab is showing its pip without a label. "
                     + "It takes the label back when there is room.");
@@ -248,25 +196,68 @@ namespace Poker.Client
             }
         }
 
-        private static TextMeshProUGUI OurLabel(GameObject tab) =>
-            tab.GetComponentsInChildren<TextMeshProUGUI>(true).FirstOrDefault();
-
-        private static IEnumerable<TextMeshProUGUI> Labels(Transform row)
+        /// <summary>
+        /// Every label on the bar, both sides of the spacer.
+        ///
+        /// Taken from the whole `MenuTaskBar` rather than from our own group: the tabs
+        /// are split into two and ours is in one of them, so scanning only our parent
+        /// would miss half the row -- including most of the game's own tabs.
+        /// </summary>
+        private static IEnumerable<TextMeshProUGUI> BarLabels(GameObject tab)
         {
-            for (var i = 0; i < row.childCount; i++)
+            var bar = tab.GetComponentInParent<MenuTaskBar>();
+
+            var root = bar != null
+                ? bar.transform
+                : tab.transform.parent;
+
+            return root == null
+                ? []
+                : root.GetComponentsInChildren<TextMeshProUGUI>(false);
+        }
+
+        /// <summary>
+        /// Cheap fingerprint of the row's shape: how many labels and how wide the
+        /// screen is. Both are things that change what fits.
+        /// </summary>
+        private static int Signature(List<TextMeshProUGUI> labels) =>
+            (labels.Count * 100_003) ^ Screen.width;
+
+        /// <summary>
+        /// Logs the whole row once, the way `Measured` does for the tab itself.
+        ///
+        /// A layout fault is the one class of bug a compiler, a test and a screenshot
+        /// are all bad at: the screenshot says it is wrong, and nothing says which box
+        /// is carrying the extra. The first version of this file shipped a check that
+        /// never fired, and one line of this log would have said so immediately.
+        /// </summary>
+        private static void Census(List<TextMeshProUGUI> labels)
+        {
+            if (_censused || labels.Count == 0)
             {
-                var child = row.GetChild(i);
+                return;
+            }
 
-                if (!child.gameObject.activeSelf)
-                {
-                    continue;
-                }
+            _censused = true;
 
-                foreach (var label in child.GetComponentsInChildren<TextMeshProUGUI>(true))
-                {
-                    yield return label;
-                }
+            var wrapped = labels.Count(Broken);
+
+            PokerClientPlugin.Log.LogInfo(
+                $"[Poker] task bar: {labels.Count} labels, {wrapped} single word(s) broken across lines.");
+
+            foreach (var label in labels)
+            {
+                var info = label.textInfo;
+
+                PokerClientPlugin.Log.LogInfo(
+                    $"[Poker]   '{label.text.Replace("\n", " ")}' "
+                    + $"w={label.rectTransform.rect.width:0.#} "
+                    + $"lines={(info == null ? -1 : info.lineCount)}"
+                    + (Broken(label) ? "  <- broken" : string.Empty));
             }
         }
+
+        private static TextMeshProUGUI OurLabel(GameObject tab) =>
+            tab.GetComponentsInChildren<TextMeshProUGUI>(true).FirstOrDefault();
     }
 }
