@@ -1044,71 +1044,40 @@ searches for the fewest chips that make the amount exactly, in units of the 5,00
 the denominations share, and reports anything genuinely unrepresentable as a
 remainder rather than rounding it away.
 
-### The piles in front of the seats, and why they are not a breakdown
+### Chips in front of the seats was tried and abandoned
 
-Each seat has a pile of chips on the cloth in front of it that grows and shrinks with
-its stack. It is the only thing on the table that shows at a glance who is winning --
-one pile spreading while another wears down to nothing is the whole story of a session,
-and reading that off five numbers is not the same as seeing it.
+Three goes, and none of them looked like a card table. Worth writing down so it is not
+started a fourth time on the same reasoning.
 
-**`ChipView.Rack` deliberately does not use `Breakdown`, and this is the one place the
-two part company.** A breakdown answers "which chips make this amount", and it answers
-it in very few chips: 765,000 is a 500k, two 100ks, a 50k and a 10k -- five discs. So is
-1,200,000, and so is 250,000. Exact, and useless as a picture, because a pile meant to
-be read at a glance would barely move between a short stack and a big one.
+The idea was a pile of chips on the cloth in front of each seat, growing and shrinking
+with that seat's stack -- the one thing on the table that would show at a glance who was
+winning. It kept failing on the same rock: **the table is photographed from directly
+above.**
 
-A pile answers a different question, so the disc **count** carries the amount -- one per
-five big blinds -- and the face is the largest denomination that slice will buy, so the
-pile is still made of real chips. Every disc is worth the same, which is what a rack in
-front of a player looks like anyway. The exact figure is on the plaque a few pixels
-away. Tied to the blinds rather than to the buy-in so it survives a change of stakes.
+- **Tall columns overlapped by three quarters** drew a ladder of green crescents. The
+  chips are drawn face on, so a heavy overlap leaves nothing of each one but a sliver of
+  rim -- and from this camera a stack of chips is one disc anyway. Height is the thing
+  the view cannot show, so it cannot be what carries the amount.
+- **Centred rows of four** drew a green pyramid, because each row is narrower than the
+  one below and every one is centred.
+- **Separate stacks in a row along the rail**, which is what a player's chips genuinely
+  look like from overhead, still read as a cluster of flat green circles rather than as
+  money.
 
-**The arrangement was wrong twice, both times for the same reason: this table is
-photographed from directly above.**
+The underlying problem is the artwork, not the arrangement. These chip faces are big
+flat top-down discs with a value printed across them, drawn to be read at pot size --
+somewhere around 44 units. At the 20 a seat's spot on the felt allows, the print is
+mush and all that is left is a coloured circle. **Anything built out of them at that
+size will look like coloured circles**, however they are arranged, so a fourth
+arrangement is not the answer. Chips drawn small, or drawn at an angle with a visible
+edge, would be -- that is new artwork, not new layout code.
 
-- **Tall columns overlapped by three quarters** came out as a ladder of green crescents.
-  The chips are drawn face on, so a heavy overlap leaves nothing of each one but a
-  sliver of rim -- and from this camera a stack of chips is one disc anyway. Height is
-  the thing the view cannot show.
-- **Centred rows of four** came out as a green pyramid, because each row is narrower
-  than the one below and every one of them is centred. Nothing on a card table is
-  stacked in a triangle.
-
-What a player's chips look like from overhead is **a short row of circles**: the tops of
-two or three or five stacks, standing side by side with felt showing between them. So
-stacks are laid out along a line with a real gap between them, filled one at a time
-rather than levelled, because real stacks are never even. Within a stack the discs are
-offset by `Rim` -- a sixth of a chip -- which is the edge of the ones underneath showing
-past the top one, and the only honest way to suggest height from above.
-
-**The row is turned to lie along the rail.** `SeatAngle` is shared by the seat, its
-chips and their rotation, so a player's chips run parallel to the edge they are sitting
-at rather than left-to-right wherever they happen to be. The discs are circles, so
-rotating the row costs them nothing.
-
-**They sit at `RackRadius` 0.86 of the cloth, out at the player's edge.** The middle of
-the table is the board and the pot; chips near it read as clutter. That number is not a
-guess -- at 0.9 the furthest chip's edge lands 2% past the cloth and onto the rail.
-**Check the chips, not the bounding box:** the pile is a rotated rectangle whose corners
-poke outside the ellipse at any radius, while the round chips inside it are comfortably
-in. Testing the box says this is impossible; testing the discs says 0.86.
-
-- **A live seat under one slice still gets a disc**, and a busted one gets none. An
-  empty spot in front of somebody still in the hand reads as a bug.
-- **A folded seat keeps its pile.** Folding costs the hand, not the stack. What is
-  committed has already left the stack the server reports, so a pile shrinks as bets are
-  made without anything on this side tracking them.
-- **The angle is shared with `SeatPosition`.** The seat is pushed outwards until it
-  clears the cloth and the pile is pulled inwards to `RackRadius` of it, so at any seat
-  count the chips sit directly in front of the person they belong to. Checked at two,
-  three and five seats: every pile is on the cloth and none of them touches the board or
-  the pot.
-- **It caps at sixteen discs**, 1,600,000 at these stakes, because that is what the spot
-  on the felt holds. A seat richer than that shows a full pile and no more; the plaque
-  carries the number.
-- **A layout group on a rect with no size has nothing to align its children within.**
-  Both the pile and each row are sized explicitly, or it would shift about as it grew
-  rather than building up from a fixed base.
+What survives the attempt: `ChipView.Breakdown` and `ChipView.Build` are untouched and
+still draw the pot, which is the one place these chips are shown at a size they were
+made for. And the reason a breakdown is wrong for a *stack* is worth keeping if this is
+ever revisited -- 765,000 is a 500k, two 100ks, a 50k and a 10k, and so is 1,200,000,
+and so is 250,000, so a pile built from one would barely move between a short stack and
+a big one.
 
 **Settled with the money path: a chip is a rouble, and the ceiling rose.** The rouble
 buy-in was capped at 500,000, well under the chip buy-in of the day, so the table asked
