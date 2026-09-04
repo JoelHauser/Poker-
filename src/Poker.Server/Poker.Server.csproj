@@ -8,7 +8,7 @@
     <AssemblyName>Poker.Server</AssemblyName>
 
     <!-- Must match ModMetadata.Version. Two places, and they have to agree. -->
-    <Version>0.1.0</Version>
+    <Version>1.0.0</Version>
 
     <!-- SPT loads the mod from user/mods/Poker, and provides its own assemblies. -->
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>

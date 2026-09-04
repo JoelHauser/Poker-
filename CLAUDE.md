@@ -1527,6 +1527,12 @@ reads this first and would have started building one.
 
 - Working branch **`uth`** (named before the variant changed), off `main`, and pushed.
   `main` has not been moved onto it.
+- **1.0.0 is the current build**: `releases/Poker-1.0.0-SPT4.1.zip`, both halves in one
+  zip, with `releases/CHANGELOG-1.0.0.md` beside it. The 0.1.0 zips were never public
+  and are removed rather than left beside it -- a stale wrong-version zip in the folder
+  is a wrong one to pick. The version lives in **five** places and `pack-mod.ps1` reads
+  it back out of `ModMetadata.cs`, so the zip name cannot drift: both csprojs, the
+  console's csproj, `ModMetadata.Version` and `PokerClientPlugin.PluginVersion`.
 - Green at **214 tests** -- 189 over the engine, 25 over the money -- mutation-checked
   throughout. Every engine test builds its own `HoldemRules`, so the stakes can be
   retuned without touching the suite.
