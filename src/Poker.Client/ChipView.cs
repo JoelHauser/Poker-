@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using TMPro;
 using UnityEngine;
@@ -269,6 +269,138 @@ namespace Poker.Client
         /// The negative spacing means each disc after the first only advances by the
         /// part of it that shows, so the row is much narrower than the count suggests.
         /// </summary>
+        /// <summary>
+        /// A rack of chips in front of a seat, tall when the seat is rich and short
+        /// when it is nearly out.
+        ///
+        /// **Deliberately not a `Breakdown`, and this is the one place the two part
+        /// company.** A breakdown answers "which chips make this amount", and it answers
+        /// it in very few chips: 765,000 is a 500k, two 100ks, a 50k and a 10k -- five
+        /// discs. So is 1,200,000, and so is 250,000. Exact, and useless as a picture,
+        /// because the pile a player is meant to read at a glance would barely move
+        /// between a short stack and a big one.
+        ///
+        /// A rack answers a different question -- "how much has that seat got" -- so the
+        /// disc **count** is what carries the amount, one per <paramref name="slice"/>.
+        /// The face is the largest denomination that slice will buy, so the pile is still
+        /// made of real chips rather than tokens, and the exact figure is on the plaque a
+        /// few pixels away. A live seat holding less than one slice still gets a single
+        /// disc: a player who is still in the hand should not have an empty spot on the
+        /// felt, and a busted one should.
+        /// </summary>
+        internal static GameObject Rack(
+            Transform parent,
+            int amount,
+            int slice,
+            float size = 17f,
+            int perColumn = 6,
+            int maxColumns = 4)
+        {
+            var go = new GameObject("Rack", typeof(RectTransform));
+            go.transform.SetParent(parent, false);
+
+            // Sized to the largest rack it could hold, rather than left at zero. A
+            // layout group on a rect with no size has nothing to align its children
+            // within, so the columns would sit wherever the group happened to put them
+            // and the whole pile would shift as it grew.
+            var spacing = size * 0.12f;
+            ((RectTransform)go.transform).sizeDelta = new Vector2(
+                (maxColumns * size) + ((maxColumns - 1) * spacing),
+                ColumnHeight(perColumn, size));
+
+            var row = go.AddComponent<HorizontalLayoutGroup>();
+
+            // Columns nearly touching, discs heavily overlapped: a rack is read by its
+            // height, and a stack of discs drawn edge to edge reads as a ladder.
+            row.spacing = spacing;
+            row.childAlignment = TextAnchor.LowerCenter;
+            row.childForceExpandWidth = false;
+            row.childForceExpandHeight = false;
+            row.childControlWidth = false;
+            row.childControlHeight = false;
+
+            if (amount <= 0 || slice <= 0)
+            {
+                return go;
+            }
+
+            var face = Face(slice);
+            if (face == null)
+            {
+                return go;
+            }
+
+            var discs = Mathf.Clamp(
+                Mathf.Max(1, Mathf.RoundToInt(amount / (float)slice)),
+                1,
+                perColumn * maxColumns);
+
+            for (var placed = 0; placed < discs;)
+            {
+                var height = Mathf.Min(perColumn, discs - placed);
+                Column(go.transform, face, height, size);
+                placed += height;
+            }
+
+            return go;
+        }
+
+        /// <summary>One column of overlapping discs, built upwards.</summary>
+        private static void Column(Transform parent, Sprite face, int height, float size)
+        {
+            var column = new GameObject("Column", typeof(RectTransform));
+            column.transform.SetParent(parent, false);
+            ((RectTransform)column.transform).sizeDelta = new Vector2(size, ColumnHeight(height, size));
+
+            var stack = column.AddComponent<VerticalLayoutGroup>();
+
+            // Negative, so each disc sits mostly behind the one below it and only its
+            // edge shows -- which is what makes a pile of discs read as a stack seen
+            // from a low angle rather than as a column of coins.
+            stack.spacing = -size * 0.74f;
+            stack.childAlignment = TextAnchor.LowerCenter;
+            stack.childForceExpandWidth = false;
+            stack.childForceExpandHeight = false;
+            stack.childControlWidth = false;
+            stack.childControlHeight = false;
+
+            for (var i = 0; i < height; i++)
+            {
+                var disc = new GameObject("Disc", typeof(RectTransform), typeof(Image));
+                disc.transform.SetParent(column.transform, false);
+                ((RectTransform)disc.transform).sizeDelta = new Vector2(size, size);
+
+                var image = disc.GetComponent<Image>();
+                image.sprite = face;
+                image.preserveAspect = true;
+                image.raycastTarget = false;
+            }
+        }
+
+        /// <summary>
+        /// How tall a column of <paramref name="discs"/> stands once they are overlapped.
+        /// One whole disc, then the sliver of each one behind it.
+        /// </summary>
+        private static float ColumnHeight(int discs, float size) =>
+            size + (Mathf.Max(0, discs - 1) * size * 0.26f);
+
+        /// <summary>
+        /// The chip a slice is drawn as: the largest denomination it will buy, so the
+        /// artwork never claims more than the slice is worth.
+        /// </summary>
+        private static Sprite Face(int slice)
+        {
+            foreach (var chip in Denominations)
+            {
+                if (chip.Value <= slice)
+                {
+                    return Sprite(chip);
+                }
+            }
+
+            return Sprite(Denominations[Denominations.Length - 1]);
+        }
+
         private static float StackWidth(int chips, float size) =>
             chips <= 0 ? 0f : size + ((chips - 1) * size * 0.58f);
 

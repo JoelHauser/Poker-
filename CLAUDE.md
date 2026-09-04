@@ -1025,6 +1025,39 @@ searches for the fewest chips that make the amount exactly, in units of the 5,00
 the denominations share, and reports anything genuinely unrepresentable as a
 remainder rather than rounding it away.
 
+### The racks in front of the seats, and why they are not a breakdown
+
+Each seat has a pile of chips on the cloth in front of it that grows and shrinks with
+its stack. It is the only thing on the table that shows at a glance who is winning --
+one pile climbing while another wears down to nothing is the whole story of a session,
+and reading that off five numbers is not the same as seeing it.
+
+**`ChipView.Rack` deliberately does not use `Breakdown`, and this is the one place the
+two part company.** A breakdown answers "which chips make this amount", and it answers
+it in very few chips: 765,000 is a 500k, two 100ks, a 50k and a 10k -- five discs. So is
+1,200,000, and so is 250,000. Exact, and useless as a picture, because a pile meant to
+be read at a glance would barely move between a short stack and a big one.
+
+A rack answers a different question, so the disc **count** carries the amount -- one per
+five big blinds -- and the face is the largest denomination that slice will buy, so the
+pile is still made of real chips. The exact figure is on the plaque a few pixels away.
+Tied to the blinds rather than to the buy-in so it survives a change of stakes: a rack
+should look the same depth at a hundred big blinds whatever those blinds are worth.
+
+- **A live seat under one slice still gets a disc**, and a busted one gets none. An
+  empty spot in front of somebody still in the hand reads as a bug.
+- **A folded seat keeps its rack.** Folding costs the hand, not the stack. What is
+  committed has already left the stack the server reports, so a rack shrinks as bets are
+  made without anything on this side tracking them.
+- **The angle is shared with `SeatPosition`.** The seat is pushed outwards until it
+  clears the cloth and the rack is pulled inwards to `RackRadius` of it, so at any seat
+  count the chips sit directly in front of the person they belong to. Checked at two,
+  three and five seats: every rack is on the cloth and none of them touches the board or
+  the pot.
+- **A layout group on a rect with no size has nothing to align its children within.**
+  Both the rack and each column are sized explicitly, or the pile would drift as it grew
+  rather than stacking upwards from a fixed base.
+
 **Settled with the money path: a chip is a rouble, and the ceiling rose.** The rouble
 buy-in was capped at 500,000, well under the chip buy-in of the day, so the table asked
 for money the wallet refused. The cap is 5,000,000 now. It cost nothing while the

@@ -73,6 +73,26 @@ namespace Poker.Client
         private const float SeatClearance = 12f;
 
         /// <summary>
+        /// How far out on the cloth a seat's chips sit, as a fraction of its radius.
+        ///
+        /// Far enough out to be that seat's own corner of the felt rather than part of
+        /// the pot, and far enough in to stay clear of the rail. It is the same
+        /// direction the seat itself was placed along, so the chips are always directly
+        /// in front of the person they belong to however many are at the table.
+        /// </summary>
+        private const float RackRadius = 0.78f;
+
+        /// <summary>
+        /// What one disc in a seat's rack is worth: five big blinds.
+        ///
+        /// Tied to the blinds rather than to the buy-in so it survives a change of
+        /// stakes -- a rack should look the same depth at a hundred big blinds whatever
+        /// those blinds are worth. At 20k that is 100,000 a disc, so a full buy-in is
+        /// ten discs and the cap at 24 is a stack that has more than doubled.
+        /// </summary>
+        private const int ChipsPerDisc = BigBlindChips * 5;
+
+        /// <summary>
         /// How far the felt sits above the middle of the screen.
         ///
         /// Not a taste: it is the one number that has to satisfy both ends at once. The
@@ -93,6 +113,7 @@ namespace Poker.Client
         private static RectTransform _board;
         private static RectTransform _potHolder;
         private static RectTransform _seatLayer;
+        private static RectTransform _rackLayer;
         private static RectTransform _actionRow;
         private static TextMeshProUGUI _status;
 
@@ -508,6 +529,7 @@ namespace Poker.Client
             foreach (var seat in all)
             {
                 BuildSeat(seat, button, all.Count);
+                BuildSeatRack(seat, all.Count);
             }
         }
 
@@ -715,6 +737,59 @@ namespace Poker.Client
         }
 
         /// <summary>
+        /// The chips in front of a seat, on the cloth.
+        ///
+        /// **The rack is the seat's stack made visible**, and it is the only thing on
+        /// the table that shows at a glance who is winning. The plaque already carries
+        /// the exact figure; this carries the shape of the game -- one seat's pile
+        /// growing while another's shrinks to nothing is the whole story of a session,
+        /// and reading it off five numbers is not the same as seeing it.
+        ///
+        /// A folded seat keeps its rack. Folding costs the hand, not the stack, and a
+        /// pile that vanished every time somebody folded would flicker round the table
+        /// once an orbit. What is committed to the pot has already left the stack the
+        /// server reports, so the rack shrinks as bets are made without anything here
+        /// having to track them.
+        /// </summary>
+        private static void BuildSeatRack(JObject seat, int total)
+        {
+            if (_rackLayer == null)
+            {
+                return;
+            }
+
+            var index = (int?)seat["Index"] ?? 0;
+            var stack = (int?)seat["Stack"] ?? 0;
+
+            var holder = NewBox("Rack" + index, _rackLayer, Color.clear);
+            holder.anchorMin = holder.anchorMax = new Vector2(0.5f, 0.5f);
+            holder.pivot = new Vector2(0.5f, 0.5f);
+            holder.sizeDelta = new Vector2(90f, 70f);
+            holder.anchoredPosition = RackPosition(index, total);
+
+            ChipView.Rack(holder, stack, ChipsPerDisc);
+        }
+
+        /// <summary>
+        /// Where a seat's chips sit: the same direction the seat was placed along, but
+        /// on the cloth rather than off it.
+        ///
+        /// Sharing the angle with <see cref="SeatPosition"/> is the point. The seat is
+        /// pushed outwards until it clears the cloth and the rack is pulled inwards to
+        /// sit on it, so however many seats there are the chips stay directly in front
+        /// of the person they belong to.
+        /// </summary>
+        private static Vector2 RackPosition(int index, int total)
+        {
+            var degrees = total <= 1 ? -90f : -90f - (index * (360f / total));
+            var radians = degrees * Mathf.Deg2Rad;
+
+            return new Vector2(
+                Mathf.Cos(radians) * ClothX * RackRadius,
+                ClothCentreY + (Mathf.Sin(radians) * ClothY * RackRadius));
+        }
+
+        /// <summary>
         /// Where a seat sits: out along its own direction until its plaque is clear of
         /// the cloth.
         ///
@@ -906,14 +981,20 @@ namespace Poker.Client
 
         private static void ClearSeats()
         {
-            if (_seatLayer == null)
+            Empty(_seatLayer);
+            Empty(_rackLayer);
+        }
+
+        private static void Empty(RectTransform layer)
+        {
+            if (layer == null)
             {
                 return;
             }
 
-            for (var i = _seatLayer.childCount - 1; i >= 0; i--)
+            for (var i = layer.childCount - 1; i >= 0; i--)
             {
-                UnityEngine.Object.Destroy(_seatLayer.GetChild(i).gameObject);
+                UnityEngine.Object.Destroy(layer.GetChild(i).gameObject);
             }
         }
 
@@ -1059,6 +1140,12 @@ namespace Poker.Client
             row.childForceExpandHeight = false;
             row.childControlWidth = false;
             row.childControlHeight = false;
+
+            // On the cloth and under the pot, because a rack belongs to the felt rather
+            // than to the seat plaque hanging off the rail -- and because a seat's chips
+            // should never draw over the community cards or the pot.
+            _rackLayer = NewBox("Racks", felt, Color.clear);
+            Stretch(_rackLayer);
 
             _potHolder = NewBox("Pot", felt, Color.clear);
             _potHolder.anchorMin = _potHolder.anchorMax = new Vector2(0.5f, 0.5f);
