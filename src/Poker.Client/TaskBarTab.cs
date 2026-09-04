@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -186,6 +186,12 @@ namespace Poker.Client
             {
                 if (_builtOnRight == OnRight)
                 {
+                    // The row is shared with the game's own tabs and with whatever
+                    // other mods have added, and it is over-subscribed easily. Checked
+                    // every tick rather than once at build, because tabs come and go
+                    // as other mods install them and the resolution can change under
+                    // us. See TabCrowding.
+                    TabCrowding.Apply(_tab);
                     return;
                 }
 
@@ -209,6 +215,7 @@ namespace Poker.Client
             }
 
             _tab = null;
+            TabCrowding.Forget();
         }
 
         // ------------------------------------------------------------------ finding it
