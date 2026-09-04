@@ -1,4 +1,4 @@
-using Poker.Game;
+﻿using Poker.Game;
 using SPTarkov.DI.Annotations;
 using SPTarkov.Server.Core.Models.Common;
 using SPTarkov.Server.Core.Models.Eft.ItemEvent;
@@ -246,10 +246,41 @@ public class PokerService(
         return Success(sessionId);
     }
 
-    public PokerResponse State(MongoId sessionId) =>
-        tables.Get(sessionId) is null
-            ? PokerResponse.Failed("You are not at a table.")
-            : Success(sessionId);
+    /// <summary>
+    /// The table as it stands, and **the place an abandoned stack is given back**.
+    ///
+    /// It refunds because it is the only request a player makes without meaning to
+    /// spend anything: opening the panel. `SitAsync` and `LeaveAsync` refund too, but
+    /// a player who is owed a stack has no reason to press either -- SIT DOWN asks for
+    /// another two million and LEAVE says they are not at a table -- so before this,
+    /// the money sat in escrow with nothing telling them it was there. It is not lost
+    /// either way, but "the mod took my roubles" is what it looks like.
+    ///
+    /// This is why it takes an output. `State` was a pure read with nothing to hang
+    /// item changes off, which is exactly why the refund was not here; the static
+    /// callback can ask `EventOutputHolder` for one the same way `sit` and `leave`
+    /// already do.
+    /// </summary>
+    public async Task<PokerResponse> StateAsync(MongoId sessionId, ItemEventRouterResponse output)
+    {
+        var note = RefundAbandoned(sessionId, output);
+
+        if (note is not null)
+        {
+            await profiles.SaveAsync(sessionId);
+        }
+
+        if (tables.Get(sessionId) is null)
+        {
+            return new PokerResponse { Ok = false, Error = "You are not at a table.", Note = note };
+        }
+
+        var view = Success(sessionId);
+
+        // A record, so the note goes on with `with` rather than by assignment -- Note is
+        // init-only, which is what keeps a response from being edited after the fact.
+        return note is null ? view : view with { Note = note };
+    }
 
     /// <summary>
     /// Stands up and takes the chips. Whatever is in front of the player converts back

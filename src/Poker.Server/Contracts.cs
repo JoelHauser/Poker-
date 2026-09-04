@@ -24,7 +24,7 @@ public record SitRequest : IRequestData
     /// Chips each seat starts with, and -- at one chip to the unit -- what the buy-in
     /// costs the player out of <see cref="Wallet"/>.
     /// </summary>
-    public int BuyIn { get; set; } = 2_000_000;
+    public int BuyIn { get; set; } = 1_000_000;
 
     /// <summary>
     /// What the buy-in is paid in. One chip is one unit of it.
@@ -143,7 +143,7 @@ public record PokerSitAction : BaseInteractionRequestData
 {
     public int Seats { get; set; } = 4;
 
-    public int BuyIn { get; set; } = 2_000_000;
+    public int BuyIn { get; set; } = 1_000_000;
 
     public int BigBlind { get; set; } = 20_000;
 

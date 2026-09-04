@@ -1,4 +1,4 @@
-using Poker.Game;
+﻿using Poker.Game;
 using SPTarkov.Server.Core.Models.Common;
 using SPTarkov.Server.Core.Models.Eft.ItemEvent;
 
@@ -237,6 +237,64 @@ public class MoneyInvariantTests
         Assert.NotNull(response.Note);
         Assert.Equal(2, harness.Bank.Debits);
         Assert.Equal(1, harness.Bank.Credits);
+    }
+
+    [Fact]
+    public async Task AskingForTheTableGivesBackAnAbandonedStack()
+    {
+        // The fault this pins cost real money on a real profile. Refunding only on sit
+        // and leave sounds sufficient and is not: a player who is owed a stack has no
+        // reason to press either -- SIT DOWN asks for another buy-in and LEAVE says they
+        // are not at a table -- so the stack sat in escrow with nothing telling them.
+        // Opening the panel is the one request they make without meaning to spend
+        // anything, which is why it is the one that has to hand the money back.
+        var harness = Build();
+        var before = harness.Bank.GetBalance(Session, Wallet.Roubles);
+
+        await harness.Service.SitAsync(Sit(), Session, Output());
+
+        // The table is gone and the stack is not -- a server restart, or a crash.
+        harness.Tables.Clear(Session);
+
+        var response = await harness.Service.StateAsync(Session, Output());
+
+        Assert.NotNull(response.Note);
+        Assert.Equal(before, harness.Bank.GetBalance(Session, Wallet.Roubles));
+        Assert.Null(harness.Escrow.Get(Session));
+
+        // Still not at a table: the refund is not a seat, and answering otherwise would
+        // have the client draw a table that does not exist.
+        Assert.False(response.Ok);
+    }
+
+    [Fact]
+    public async Task AskingForTheTableTwiceDoesNotPayTwice()
+    {
+        var harness = Build();
+        await harness.Service.SitAsync(Sit(), Session, Output());
+        harness.Tables.Clear(Session);
+
+        await harness.Service.StateAsync(Session, Output());
+        var again = await harness.Service.StateAsync(Session, Output());
+
+        Assert.Null(again.Note);
+        Assert.Equal(1, harness.Bank.Credits);
+    }
+
+    [Fact]
+    public async Task ASeatedPlayerAskingForTheTableIsNotRefunded()
+    {
+        // A live table still owns its stack. Refunding here would hand back the buy-in
+        // and leave the player sitting behind chips they no longer own.
+        var harness = Build();
+        await harness.Service.SitAsync(Sit(), Session, Output());
+
+        var response = await harness.Service.StateAsync(Session, Output());
+
+        Assert.True(response.Ok, response.Error);
+        Assert.Null(response.Note);
+        Assert.Equal(0, harness.Bank.Credits);
+        Assert.NotNull(harness.Escrow.Get(Session));
     }
 
     [Fact]

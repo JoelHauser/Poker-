@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -156,6 +156,13 @@ namespace Poker.Client
                 // visit, and /poker/state is what says so. Its failure is the ordinary
                 // "not at a table" case, not an error worth showing as one.
                 var state = PokerApi.State();
+
+                // Asking for the table is also what gives back a stack left behind by a
+                // session that never finished -- see PokerService.StateAsync -- so the
+                // reply can carry money as well as a view. Two things follow, and both
+                // are easy to miss because the usual reply carries neither.
+                var note = (string)state?["Note"];
+
                 if (Ok(state))
                 {
                     Render(state);
@@ -163,6 +170,17 @@ namespace Poker.Client
                 else
                 {
                     ShowLobby();
+                }
+
+                if (!string.IsNullOrEmpty(note))
+                {
+                    // The refund went through a static route, so the running game does
+                    // not know its stash changed. Without this the roubles are in the
+                    // profile and invisible until a reload, which is the failure that
+                    // reads as the mod having eaten them.
+                    ProfileSync.Request();
+
+                    SetStatus(note);
                 }
             }
             catch (Exception ex)
@@ -279,7 +297,7 @@ namespace Poker.Client
         /// <summary>Seats, chips and blinds, in one place so the label cannot lie.</summary>
         private const int TableSeats = 5;
 
-        private const int BuyInChips = 2_000_000;
+        private const int BuyInChips = 1_000_000;
 
         private const int BigBlindChips = 20_000;
 

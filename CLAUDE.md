@@ -1012,7 +1012,7 @@ artwork and the arithmetic cannot drift apart.
 
 **The stakes are set by the chips, not the other way round.** The smallest chip is
 10,000, so that is the small blind: blinds are **10k / 20k** and the buy-in
-**2,000,000**, the hundred big blinds a cash game usually starts at. Every stake is
+**1,000,000**, fifty big blinds. Every stake is
 a whole number of the smallest chip, because a blind that cannot be built out of
 chips is one the table can never show honestly. The first stakes were 25 / 50 with
 a 5,000 buy-in, at which no chip could ever have appeared on the felt.
@@ -1026,13 +1026,13 @@ the denominations share, and reports anything genuinely unrepresentable as a
 remainder rather than rounding it away.
 
 **Settled with the money path: a chip is a rouble, and the ceiling rose.** The rouble
-buy-in was capped at 500,000, well under the 2,000,000 chip buy-in, so the table asked
+buy-in was capped at 500,000, well under the chip buy-in of the day, so the table asked
 for money the wallet refused. The cap is 5,000,000 now. It cost nothing while the
 chips were notional and became blocking the moment they were not, which is the usual
 shape of a deferred contradiction.
 
 The same rate is why no other wallet can sit down yet: one chip to the unit means a
-2,000,000 chip table needs 2,000,000 of something, and nothing but roubles is held in
+1,000,000 chip table needs 1,000,000 of something, and nothing but roubles is held in
 those numbers. A chips-per-unit rate per wallet is what opens the rest up.
 
 ## The money
@@ -1040,7 +1040,7 @@ those numbers. A chips-per-unit rate per wallet is what opens the rest up.
 **One chip is one rouble.** The buy-in is debited on sitting down, the stack is
 credited on standing up, and the difference is what the player won or lost. That
 rate is also why roubles are the only wallet that works at these stakes: a
-2,000,000 chip table cannot be bought into with four bitcoin, and nothing else is
+1,000,000 chip table cannot be bought into with two bitcoin, and nothing else is
 held in numbers like these. Giving each wallet a chips-per-unit rate is what would
 open the rest up.
 
@@ -1063,7 +1063,7 @@ reading this.
   a comment with a type, so it is now a comment.
 
 What this does **not** fix: dollars and euros still cannot sit down. One chip to the
-unit means a 2,000,000 chip table needs 2,000,000 of something, and their ceilings are
+unit means a 1,000,000 chip table needs 1,000,000 of something, and their ceilings are
 5,000. **Roubles remain the only wallet a player can actually use**, and the
 chips-per-unit rate is still what opens the other two.
 `AWalletThatCannotCoverTheseStakesIsRefusedByName` pins the refusal, and now does it
@@ -1168,7 +1168,7 @@ which was substituting an argument for the thing that had already been tested.
 
 ### The buy-in asks first
 
-`SIT DOWN` was written when sitting down was free. It now spends two million
+`SIT DOWN` was written when sitting down was free. It now spends a million
 roubles, so the price is on the button and the button asks twice. The seats, chips
 and blinds are constants in one place so the label cannot drift from the request --
 which is the same failure the five stake defaults have, one screen further out.
@@ -1407,10 +1407,10 @@ These were settled there against the real client and apply unchanged.
 ## Verifying
 
 ```
-dotnet test    # 210 tests, no SPT needed. About 11s.
+dotnet test    # 214 tests, no SPT needed. About 11s.
 ```
 
-189 over the engine and 21 over the money and both transports. Neither needs a server:
+189 over the engine and 25 over the money and both transports. Neither needs a server:
 the money tests run on fakes, which is the whole reason they could be written before
 the settlement they check.
 
@@ -1473,7 +1473,7 @@ reads this first and would have started building one.
 
 - Working branch **`uth`** (named before the variant changed), off `main`, and pushed.
   `main` has not been moved onto it.
-- Green at **210 tests** -- 189 over the engine, 21 over the money -- mutation-checked
+- Green at **214 tests** -- 189 over the engine, 25 over the money -- mutation-checked
   throughout. Every engine test builds its own `HoldemRules`, so the stakes can be
   retuned without touching the suite.
 - **The variant is no-limit Texas Hold'em against bots**, decided after two
@@ -1496,8 +1496,8 @@ reads this first and would have started building one.
 
   What has **not** been exercised: any wallet but roubles, and the shortfall-to-mail
   path.
-- **A stack is sitting in escrow unpaid right now.** See "Open items" -- this is the
-  one thing the live run turned up, and it is a real fault rather than a loose end.
+- **The one fault the live run turned up is fixed**: an abandoned stack is now given
+  back when the panel is opened, not only on a buy-in or a cash-out. See "Open items".
 - **The mod has run in the game** and hands deal, play and settle from inside Tarkov:
   the version gate passes, the six routes register, the session resolves, the wallets
   read, and hands run through all four streets with re-raises, folds, side stacks and
@@ -1515,7 +1515,7 @@ reads this first and would have started building one.
   imhoom__ttv -- and one agent per seat, blended from the named cast (Shark/Maniac,
   Rock/Gambler) so no two tables are the same.
 - **The chips are real art with real denominations**, and the stakes were retuned
-  to fit them: blinds 10k / 20k, buy-in 2,000,000.
+  to fit them: blinds 10k / 20k, buy-in 1,000,000.
 - **Currency only, as of the wallet cut.** Roubles, dollars and euros; GP coins,
   bitcoin and Lega medals are gone, and `WalletKind` with them. Roubles are still the
   only wallet that can actually cover these stakes. See "Currency only, and why the
@@ -1541,25 +1541,27 @@ prints the template's geometry and ours side by side.
 
 - ~~**Smoke it against a profile.**~~ **Done, and it was right.** See "Current state"
   for the figures.
-- **An abandoned stack is only refunded on `sit` or `leave`, never on `state` -- and
-  there is one owed right now.** `RefundAbandoned` is called from `SitAsync` and
-  `LeaveAsync` and from nowhere else, because `State` is a pure read with no
-  `ItemEventRouterResponse` to hang item changes off. So a session that ends by
-  closing the game leaves the stack recorded, and the player's next visit to the
-  panel -- which calls `/poker/state` -- answers "You are not at a table" and returns
-  nothing.
+- ~~**An abandoned stack is only refunded on `sit` or `leave`.**~~ **Fixed: reading the
+  table refunds too.** Worth keeping the reasoning, because "sit and leave both refund"
+  sounds sufficient and is not. A player who is owed a stack has no reason to press
+  either -- SIT DOWN asks for another buy-in and LEAVE says they are not at a table --
+  so the money sat in escrow with nothing telling them it was there. **Opening the panel
+  is the one request a player makes without meaning to spend anything**, which is exactly
+  why it is the one that has to hand money back.
 
-  The startup banner says *"each is paid back on next contact"*, which is not true as
-  written: it is paid back on the next **buy-in or cash-out**. The money is not lost;
-  pressing SIT DOWN refunds the old stack before taking the new buy-in. But the
-  player is never told they are owed it.
+  What made it look impossible was `State` being a pure read with no
+  `ItemEventRouterResponse` to hang item changes off. It never needed one of its own:
+  the static callback asks `EventOutputHolder` for an output the same way `sit` and
+  `leave` already do, and the item-event `sync` has had one all along.
 
-  Live example, still on disk at `SPT_Runtime/user/mods/Poker/data/escrow.json`:
-  **2,105,000 roubles held for `6a8cd3a7e0b8272790f41285`** since 3 Sep 2026.
+  Mutation-checked, three faults, each caught: state never refunding (3 fail), the
+  live-table guard dropped so a seated player is refunded mid-session (1), and escrow
+  never released so the refund pays on every redraw (4).
 
-  Worth fixing properly rather than by widening the banner's wording. The state route
-  could carry the note without moving money, or the refund could ride the `sync` item
-  event, which already exists and already has an output to attach to.
+  **The client has to sync afterwards.** The refund goes through a static route, so the
+  money lands in the profile and the running game does not know -- the documented stale
+  stash hazard, and here it would look exactly like the mod eating the refund.
+  `PokerPanel.Open` calls `ProfileSync.Request()` and shows the note when one comes back.
 - ~~**Build the client changes.**~~ **Done**, and they have now been seen as well: the
   tab, the pot column, the buy-in confirmation, the close fade and the whole table
   layout.
@@ -1604,8 +1606,8 @@ prints the template's geometry and ours side by side.
   Launching the game once is cheaper than finishing this, unless a machine turns up
   where that is impossible.
 - **Give each wallet a chips-per-unit rate.** One chip to one unit means only roubles
-  can buy into a 2,000,000 chip table, so **dollars and euros are stakeable in the
-  enum and refused in practice** -- their ceilings are 5,000 against a 2,000,000 chip
+  can buy into a 1,000,000 chip table, so **dollars and euros are stakeable in the
+  enum and refused in practice** -- their ceilings are 5,000 against a 1,000,000 chip
   buy-in. A rate per wallet is what opens them up, and it is now the *only* thing
   standing between the mod and its full wallet list, because the valuables that used
   to complicate this are gone.
@@ -1617,7 +1619,7 @@ prints the template's geometry and ours side by side.
 - ~~**The table layout is derived, not eyeballed.**~~ It was eyeballed, and seen on a
   screen it was wrong in three ways at once. Now derived -- see "The table was laid
   out against the picture, not the table in it".
-- **The buy-in is hardcoded** in `PokerPanel.Sit` at five seats, 2,000,000, 20k
+- **The buy-in is hardcoded** in `PokerPanel.Sit` at five seats, 1,000,000, 20k
   blinds. `/poker/sit` takes all three, so a setup row is easy.
 - Side pots are settled correctly but are not drawn as separate pots.
 

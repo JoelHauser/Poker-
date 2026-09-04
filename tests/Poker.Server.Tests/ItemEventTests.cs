@@ -1,4 +1,4 @@
-using Poker.Game;
+﻿using Poker.Game;
 using SPTarkov.Server.Core.Models.Common;
 using SPTarkov.Server.Core.Models.Eft.ItemEvent;
 
@@ -130,18 +130,36 @@ public class ItemEventTests
     }
 
     [Fact]
-    public void SyncTouchesNothingAndStillCarriesTheChangeRecord()
+    public async Task SyncMovesNoMoneyOfItsOwnAndStillCarriesTheChangeRecord()
     {
-        // Its whole job is to be a harmless thing to send when the client needs the
-        // profile changes the server has been holding for it.
+        // Its job is to be a harmless thing to send when the client needs the profile
+        // changes the server has been holding for it. It is no longer strictly a no-op
+        // -- reading the table is what gives back an abandoned stack -- so what is
+        // pinned here is that with nothing owed it still moves nothing.
         var harness = Build();
         var output = new ItemEventRouterResponse();
 
-        var reply = harness.Events.Sync(Session, output);
+        var reply = await harness.Events.Sync(Session, output);
 
         Assert.Same(output, reply);
         Assert.Equal(0, harness.Bank.Debits);
         Assert.Equal(0, harness.Bank.Credits);
+    }
+
+    [Fact]
+    public async Task SyncGivesBackAnAbandonedStackToo()
+    {
+        // Both transports refund, because either can be the first thing a returning
+        // player sends. BothTransportsMoveTheSameMoney is the rule and this is the
+        // easiest place to break it.
+        var harness = Build();
+        await harness.Events.Sit(Sit(), Session, new ItemEventRouterResponse());
+        harness.Tables.Clear(Session);
+
+        await harness.Events.Sync(Session, new ItemEventRouterResponse());
+
+        Assert.Equal(1, harness.Bank.Credits);
+        Assert.Null(harness.Escrow.Get(Session));
     }
 
     [Fact]

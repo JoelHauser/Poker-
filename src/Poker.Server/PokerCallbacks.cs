@@ -1,4 +1,4 @@
-using SPTarkov.DI.Annotations;
+﻿using SPTarkov.DI.Annotations;
 using SPTarkov.Server.Core.Models.Common;
 using SPTarkov.Server.Core.Models.Eft.ItemEvent;
 using SPTarkov.Server.Core.Routers;
@@ -63,10 +63,15 @@ public class PokerCallbacks(
         return new ValueTask<string>(Respond(service.Act(info, sessionId)));
     }
 
-    public ValueTask<string> State(StateRequest info, MongoId sessionId)
+    public async ValueTask<string> State(StateRequest info, MongoId sessionId)
     {
         Received("state", sessionId, null);
-        return new ValueTask<string>(Respond(service.State(sessionId)));
+
+        // An output, for a request that reads. Asking for the table is the one thing a
+        // player does without meaning to spend anything, so it is where an abandoned
+        // stack gets given back -- and giving it back moves items. See
+        // PokerService.StateAsync.
+        return Respond(await service.StateAsync(sessionId, Output(sessionId)));
     }
 
     public async ValueTask<string> Leave(LeaveRequest info, MongoId sessionId)

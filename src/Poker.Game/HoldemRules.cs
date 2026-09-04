@@ -23,7 +23,7 @@ public sealed record HoldemRules
     /// A blind that cannot be made out of chips is one the table can never show
     /// honestly.
     /// </summary>
-    public int BuyIn { get; init; } = 2_000_000;
+    public int BuyIn { get; init; } = 1_000_000;
 
     /// <summary>
     /// The most seats a table can have, the player's included. The player chooses how

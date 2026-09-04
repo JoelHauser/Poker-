@@ -1,4 +1,4 @@
-using SPTarkov.DI.Annotations;
+﻿using SPTarkov.DI.Annotations;
 using SPTarkov.Server.Core.Models.Common;
 using SPTarkov.Server.Core.Models.Eft.ItemEvent;
 
@@ -75,18 +75,21 @@ public class PokerItemEventCallbacks(PokerService service, IPokerLog log)
     }
 
     /// <summary>
-    /// Does nothing on purpose.
+    /// Asks for the table, and carries the profile changes back.
     ///
     /// The client sends this when it wants the profile changes the server has been
     /// holding for it -- after money has moved through a static route, say. The reply
-    /// carries them by virtue of being an item-event reply at all, so there is nothing
-    /// for this to do but exist.
+    /// carries them by virtue of being an item-event reply at all.
+    ///
+    /// It is no longer quite a no-op: reading the table is also what gives back an
+    /// abandoned stack, and this transport has had an output to hang that on all along.
+    /// See PokerService.StateAsync.
     /// </summary>
-    public ItemEventRouterResponse Sync(MongoId sessionId, ItemEventRouterResponse output)
+    public async Task<ItemEventRouterResponse> Sync(MongoId sessionId, ItemEventRouterResponse output)
     {
         log.Detail($"-> sync (item event) [{sessionId}]");
 
-        return Attach(output, service.State(sessionId));
+        return Attach(output, await service.StateAsync(sessionId, output));
     }
 
     private ItemEventRouterResponse Attach(ItemEventRouterResponse output, PokerResponse response)

@@ -9,7 +9,7 @@ internal sealed record Options
 
     public int BigBlind { get; init; } = 20_000;
 
-    public int BuyIn { get; init; } = 2_000_000;
+    public int BuyIn { get; init; } = 1_000_000;
 
     /// <summary>Printed at startup, so any hand can be got back exactly.</summary>
     public int Seed { get; init; } = Environment.TickCount;
