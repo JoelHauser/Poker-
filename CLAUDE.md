@@ -1025,11 +1025,11 @@ searches for the fewest chips that make the amount exactly, in units of the 5,00
 the denominations share, and reports anything genuinely unrepresentable as a
 remainder rather than rounding it away.
 
-### The racks in front of the seats, and why they are not a breakdown
+### The piles in front of the seats, and why they are not a breakdown
 
 Each seat has a pile of chips on the cloth in front of it that grows and shrinks with
 its stack. It is the only thing on the table that shows at a glance who is winning --
-one pile climbing while another wears down to nothing is the whole story of a session,
+one pile spreading while another wears down to nothing is the whole story of a session,
 and reading that off five numbers is not the same as seeing it.
 
 **`ChipView.Rack` deliberately does not use `Breakdown`, and this is the one place the
@@ -1038,25 +1038,38 @@ it in very few chips: 765,000 is a 500k, two 100ks, a 50k and a 10k -- five disc
 1,200,000, and so is 250,000. Exact, and useless as a picture, because a pile meant to
 be read at a glance would barely move between a short stack and a big one.
 
-A rack answers a different question, so the disc **count** carries the amount -- one per
+A pile answers a different question, so the disc **count** carries the amount -- one per
 five big blinds -- and the face is the largest denomination that slice will buy, so the
-pile is still made of real chips. The exact figure is on the plaque a few pixels away.
-Tied to the blinds rather than to the buy-in so it survives a change of stakes: a rack
-should look the same depth at a hundred big blinds whatever those blinds are worth.
+pile is still made of real chips. Every disc is worth the same, which is what a rack in
+front of a player looks like anyway. The exact figure is on the plaque a few pixels
+away. Tied to the blinds rather than to the buy-in so it survives a change of stakes.
+
+**The chips lie flat in overlapping rows. They are not stacked, and they cannot be.**
+The first attempt built vertical columns overlapped by three quarters, reasoning that a
+rack is read by its height. On screen it was a green ladder. The artwork is why: the
+chips are drawn **face on, from directly above**, so a three-quarter overlap leaves
+nothing of each one but a crescent of rim. The table is photographed from above too, and
+**from that camera a stack of chips is one disc** -- height is the one thing this view
+cannot show. Spreading them across the felt is what a top-down table does instead, and it
+grows and shrinks just as legibly. The horizontal overlap is the pot's, which already
+reads correctly.
 
 - **A live seat under one slice still gets a disc**, and a busted one gets none. An
   empty spot in front of somebody still in the hand reads as a bug.
-- **A folded seat keeps its rack.** Folding costs the hand, not the stack. What is
-  committed has already left the stack the server reports, so a rack shrinks as bets are
+- **A folded seat keeps its pile.** Folding costs the hand, not the stack. What is
+  committed has already left the stack the server reports, so a pile shrinks as bets are
   made without anything on this side tracking them.
 - **The angle is shared with `SeatPosition`.** The seat is pushed outwards until it
-  clears the cloth and the rack is pulled inwards to `RackRadius` of it, so at any seat
+  clears the cloth and the pile is pulled inwards to `RackRadius` of it, so at any seat
   count the chips sit directly in front of the person they belong to. Checked at two,
-  three and five seats: every rack is on the cloth and none of them touches the board or
+  three and five seats: every pile is on the cloth and none of them touches the board or
   the pot.
+- **It caps at sixteen discs**, 1,600,000 at these stakes, because that is what the spot
+  on the felt holds. A seat richer than that shows a full pile and no more; the plaque
+  carries the number.
 - **A layout group on a rect with no size has nothing to align its children within.**
-  Both the rack and each column are sized explicitly, or the pile would drift as it grew
-  rather than stacking upwards from a fixed base.
+  Both the pile and each row are sized explicitly, or it would shift about as it grew
+  rather than building up from a fixed base.
 
 **Settled with the money path: a chip is a rouble, and the ceiling rose.** The rouble
 buy-in was capped at 500,000, well under the chip buy-in of the day, so the table asked
